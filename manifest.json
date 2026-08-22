@@ -1,0 +1,9 @@
+{
+	"id": "nihong-ai-explain",
+	"name": "日语 AI 讲解",
+	"version": "0.1.0",
+	"minAppVersion": "1.4.0",
+	"description": "选中日语单词，一键调用大模型生成讲解并保存为笔记。",
+	"author": "syy",
+	"isDesktopOnly": false
+}

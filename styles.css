@@ -1,0 +1,23 @@
+.nihong-ai-pill {
+	position: absolute;
+	z-index: 1000;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	padding: 4px 12px;
+	border-radius: 6px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 500;
+	user-select: none;
+	white-space: nowrap;
+	transition: opacity 0.1s ease;
+}
+
+.nihong-ai-pill:hover {
+	opacity: 0.85;
+}
+
+.nihong-ai-pill:active {
+	transform: translateY(1px);
+}

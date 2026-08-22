@@ -1,0 +1,27 @@
+{
+	"name": "obsidian-nihong-ai-explain",
+	"version": "0.1.0",
+	"description": "选中日语单词，一键调用大模型生成讲解并保存为笔记。",
+	"main": "main.js",
+	"type": "commonjs",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"typecheck": "tsc -noEmit -skipLibCheck"
+	},
+	"keywords": [
+		"obsidian",
+		"plugin",
+		"japanese",
+		"ai"
+	],
+	"author": "syy",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"builtin-modules": "^4.0.0",
+		"esbuild": "^0.20.2",
+		"obsidian": "^1.5.7",
+		"typescript": "^5.4.0"
+	}
+}
