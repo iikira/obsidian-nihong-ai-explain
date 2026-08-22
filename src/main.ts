@@ -7,6 +7,9 @@ import {
 import { SelectionPill } from "./pill";
 import { TranslateCard } from "./translateCard";
 import { LRUTranslateCache } from "./translateCache";
+import { DictionaryManager } from "./dictionaryManager";
+import { DictionaryPopup } from "./dictionaryPopup";
+import { centerRect } from "./popupUtils";
 
 interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -34,6 +37,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 	private pill: SelectionPill | null = null;
 	private translateCard: TranslateCard | null = null;
 	translateCache: LRUTranslateCache | null = null;
+	dictionaryManager: DictionaryManager | null = null;
+	private dictionaryPopup: DictionaryPopup | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -42,6 +47,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCard = new TranslateCard();
 		this.translateCache = new LRUTranslateCache();
 		this.translateCache.load();
+		this.dictionaryManager = new DictionaryManager(this.app);
+		await this.dictionaryManager.init();
+		this.dictionaryPopup = new DictionaryPopup((name) =>
+			this.dictionaryManager?.getTag(name)
+		);
 		this.pill = new SelectionPill([
 			{
 				id: "explain",
@@ -52,6 +62,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 				id: "translate",
 				label: "翻译",
 				handler: (text) => this.translate(text),
+			},
+			{
+				id: "lookup",
+				label: "查词典",
+				handler: (text) => this.lookup(text),
 			},
 		]);
 		this.pill.attach();
@@ -73,6 +88,12 @@ export default class NihongAIExplainPlugin extends Plugin {
 						.setTitle("翻译此段")
 						.setIcon("languages")
 						.onClick(() => void this.translate(sel));
+				});
+				menu.addItem((item) => {
+					item
+						.setTitle("查词典")
+						.setIcon("book-open")
+						.onClick(() => void this.lookup(sel));
 				});
 			})
 		);
@@ -102,6 +123,19 @@ export default class NihongAIExplainPlugin extends Plugin {
 				void this.translate(sel);
 			},
 		});
+
+		this.addCommand({
+			id: "nihong-ai-lookup-selection",
+			name: "查词典选中文字",
+			callback: () => {
+				const sel = window.getSelection()?.toString().trim() ?? "";
+				if (!sel) {
+					new Notice("请先选中一段文字");
+					return;
+				}
+				void this.lookup(sel);
+			},
+		});
 	}
 
 	onunload(): void {
@@ -109,8 +143,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.pill = null;
 		this.translateCard?.hide();
 		this.translateCard = null;
+		this.dictionaryPopup?.hide();
+		this.dictionaryPopup = null;
 		this.translateCache?.flush();
 		this.translateCache = null;
+		this.dictionaryManager = null;
 	}
 
 	async loadSettings(): Promise<void> {
@@ -357,6 +394,42 @@ export default class NihongAIExplainPlugin extends Plugin {
 		}
 	}
 
+	async lookup(text: string): Promise<void> {
+		const clean = text.trim();
+		if (!clean) {
+			new Notice("选区为空");
+			return;
+		}
+		if (!this.dictionaryManager || !this.dictionaryManager.isReady) {
+			new Notice("词典未初始化，请先在设置中导入词典");
+			return;
+		}
+		const imported = await this.dictionaryManager.isImported();
+		if (!imported) {
+			new Notice("未导入词典，请先在设置中导入");
+			return;
+		}
+		if (!this.dictionaryPopup) {
+			this.dictionaryPopup = new DictionaryPopup((name) =>
+				this.dictionaryManager?.getTag(name)
+			);
+		}
+
+		const rect = this.getSelectionRect() ?? centerRect();
+		this.dictionaryPopup.showLoading(rect);
+
+		try {
+			const results = await this.dictionaryManager.lookup(clean);
+			const rectNow = this.getSelectionRect() ?? rect;
+			this.dictionaryPopup.showResult(results, rectNow);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			const rectNow = this.getSelectionRect() ?? rect;
+			this.dictionaryPopup.showError(`查询失败: ${msg}`, rectNow);
+			console.error("[nihong-ai-explain] 词典查询失败:", e);
+		}
+	}
+
 	private getSelectionRect(): DOMRect | null {
 		const sel = window.getSelection();
 		if (!sel || sel.rangeCount === 0) {
@@ -370,11 +443,6 @@ export default class NihongAIExplainPlugin extends Plugin {
 	}
 
 	private fallbackRect(): DOMRect {
-		return new DOMRect(
-			window.innerWidth / 2 - 150,
-			window.innerHeight / 2 - 60,
-			300,
-			40
-		);
+		return centerRect();
 	}
 }

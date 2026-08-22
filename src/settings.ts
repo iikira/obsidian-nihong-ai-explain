@@ -24,6 +24,8 @@ export interface NihongAIExplainSettings {
 	requestTimeout: number;
 	/** 翻译目标语言 */
 	targetLanguage: string;
+	/** 词典 zip 路径 */
+	dictionaryZipPath: string;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -169,6 +171,8 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	retryInterval: 2000,
 	requestTimeout: 120000,
 	targetLanguage: "中文",
+	dictionaryZipPath:
+		"D:\\obsidian\\jp\\jp\\.obsidian\\plugins\\japanese-popup-dictionary\\jitendex-yomitan.zip",
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -343,6 +347,95 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						this.plugin.translateCache?.clear();
 						new Notice("已清空翻译缓存");
 						cacheSetting.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 0 条。`);
+					})
+			);
+
+		// ====== 词典管理 ======
+
+		containerEl.createEl("h3", { text: "离线词典" });
+
+		new Setting(containerEl)
+			.setName("词典 zip 路径")
+			.setDesc("Yomitan 格式 zip 的绝对路径（含 term_bank_*.json）。")
+			.addText((text) =>
+				text
+					.setPlaceholder("D:\\...\\jitendex-yomitan.zip")
+					.setValue(this.plugin.settings.dictionaryZipPath)
+					.onChange(async (value) => {
+						this.plugin.settings.dictionaryZipPath = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		const dictStatusSetting = new Setting(containerEl)
+			.setName("词典状态")
+			.setDesc("检测中…");
+
+		const refreshDictStatus = async (): Promise<void> => {
+			const mgr = this.plugin.dictionaryManager;
+			if (!mgr || !mgr.isReady) {
+				dictStatusSetting.setDesc("词典未初始化");
+				return;
+			}
+			const imported = await mgr.isImported();
+			if (!imported) {
+				dictStatusSetting.setDesc("未导入词典");
+				return;
+			}
+			const dicts = await mgr.getDictionaries();
+			dictStatusSetting.setDesc(
+				`已导入 ${dicts.length} 部词典: ${dicts.map((d) => d.title).join(", ")}`
+			);
+		};
+		void refreshDictStatus();
+
+		new Setting(containerEl)
+			.setName("导入词典")
+			.setDesc("从配置的 zip 路径导入到 IndexedDB（首次使用或更新词典时点此）。")
+			.addButton((btn) =>
+				btn
+					.setButtonText("导入")
+					.setCta()
+					.onClick(async () => {
+						const mgr = this.plugin.dictionaryManager;
+						if (!mgr) {
+							new Notice("词典管理器未初始化");
+							return;
+						}
+						const path = this.plugin.settings.dictionaryZipPath.trim();
+						if (!path) {
+							new Notice("请先填写词典 zip 路径");
+							return;
+						}
+						btn.setButtonText("导入中…").setDisabled(true);
+						try {
+							await mgr.importFromZip(path);
+							await refreshDictStatus();
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							new Notice(`导入失败: ${msg}`, 8000);
+							console.error("[nihong-ai] 词典导入失败:", e);
+						} finally {
+							btn.setButtonText("导入").setDisabled(false);
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("清空词典")
+			.setDesc("清空 IndexedDB 中的所有词典数据。")
+			.addButton((btn) =>
+				btn
+					.setButtonText("清空")
+					.setWarning()
+					.onClick(async () => {
+						const mgr = this.plugin.dictionaryManager;
+						if (!mgr) {
+							return;
+						}
+						await mgr.clear();
+						new Notice("已清空词典");
+						await refreshDictStatus();
 					})
 			);
 	}

@@ -1,3 +1,5 @@
+import { positionCard } from "./popupUtils";
+
 const CARD_CLASS = "nihong-ai-translate-card";
 
 type State = "loading" | "result" | "error";
@@ -103,32 +105,9 @@ export class TranslateCard {
 		if (!this.el) {
 			return;
 		}
-		// 先显示以测量尺寸
-		this.el.style.display = "block";
-		const cardRect = this.el.getBoundingClientRect();
-		const gap = 8;
-		const margin = 4;
-		let top = rect.bottom + gap;
-		let left = rect.left + (rect.width - cardRect.width) / 2;
-		if (left < margin) {
-			left = margin;
-		}
-		const maxLeft = window.innerWidth - cardRect.width - margin;
-		if (left > maxLeft) {
-			left = maxLeft;
-		}
-		// 若下方溢出，尝试放上方
-		if (top + cardRect.height > window.innerHeight - margin) {
-			const aboveTop = rect.top - gap - cardRect.height;
-			if (aboveTop > margin) {
-				top = aboveTop;
-			} else {
-				// 都放不下，贴近底部
-				top = window.innerHeight - cardRect.height - margin;
-			}
-		}
-		this.el.style.top = `${top + window.scrollY}px`;
-		this.el.style.left = `${left + window.scrollX}px`;
+		const { top, left } = positionCard(this.el, rect);
+		this.el.style.top = `${top}px`;
+		this.el.style.left = `${left}px`;
 	}
 
 	private attachHideListeners(): void {
