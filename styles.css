@@ -187,6 +187,8 @@
 	font-size: 10px;
 	font-weight: normal;
 	color: var(--text-muted);
+	user-select: none;
+	-webkit-user-select: none;
 }
 
 .nihong-ai-dict-reason {

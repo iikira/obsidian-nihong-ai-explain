@@ -15,6 +15,9 @@ export class DictionaryPopup {
 		this.hide();
 	};
 	private externalClickHandler: ((e: MouseEvent) => void) | null = null;
+	private copyHandler = (e: ClipboardEvent): void => {
+		this.sanitizeCopy(e);
+	};
 
 	constructor(private getTag: (name: string) => ProcessedTag | undefined) {}
 
@@ -45,6 +48,7 @@ export class DictionaryPopup {
 
 	hide(): void {
 		if (this.el) {
+			this.el.removeEventListener("copy", this.copyHandler);
 			this.el.remove();
 			this.el = null;
 		}
@@ -371,5 +375,37 @@ export class DictionaryPopup {
 			this.hide();
 		};
 		document.addEventListener("mousedown", this.externalClickHandler);
+		if (this.el) {
+			this.el.addEventListener("copy", this.copyHandler);
+		}
+	}
+
+	/** 复制时剥离振假名 <rt>，只留汉字本体 */
+	private sanitizeCopy(e: ClipboardEvent): void {
+		const selection = document.getSelection();
+		if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+			return;
+		}
+		const range = selection.getRangeAt(0);
+		// 只处理选区与本卡片有交集的情况
+		if (!this.el || !this.el.contains(range.commonAncestorContainer) && !range.intersectsNode(this.el)) {
+			return;
+		}
+		const fragment = range.cloneContents();
+		// 移除所有 <rt>（振假名注音）——保留 <ruby> 的 base text
+		fragment.querySelectorAll("rt").forEach((rt) => rt.remove());
+		const text = this.fragmentToText(fragment);
+		const plain = text.replace(/\n{3,}/g, "\n\n").trim();
+		if (e.clipboardData) {
+			e.clipboardData.setData("text/plain", plain);
+			e.preventDefault();
+		}
+	}
+
+	private fragmentToText(fragment: DocumentFragment): string {
+		// 用 innerText 取视觉换行（尊重 block 元素），fallback 到 textContent
+		const div = document.createElement("div");
+		div.appendChild(fragment);
+		return div.innerText || div.textContent || "";
 	}
 }
