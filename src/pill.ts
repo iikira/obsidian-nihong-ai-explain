@@ -1,3 +1,5 @@
+import { setIcon } from "obsidian";
+
 const FALLBACK_PILL_ID = "nihong-ai-pill";
 const LEXIS_PILL_SELECTOR = ".lexis-sel-pill";
 const ACTION_ATTR = "data-nihong-action";
@@ -190,7 +192,11 @@ export class SelectionPill {
 			const btn = document.createElement("span");
 			btn.className = "lexis-sel-pill-btn";
 			btn.setAttribute(ACTION_ATTR, action.id);
-			btn.textContent = action.label;
+			if (action.icon) {
+				setIcon(btn, action.icon);
+			} else {
+				btn.textContent = action.label;
+			}
 			btn.title = action.label;
 			btn.addEventListener("click", (ev) => {
 				ev.preventDefault();
@@ -280,7 +286,11 @@ export class SelectionPill {
 		for (const action of this.actions) {
 			const btn = document.createElement("button");
 			btn.className = "nihong-ai-pill-btn";
-			btn.textContent = action.label;
+			if (action.icon) {
+				setIcon(btn, action.icon);
+			} else {
+				btn.textContent = action.label;
+			}
 			btn.title = action.label;
 			btn.addEventListener("click", (ev) => {
 				ev.preventDefault();

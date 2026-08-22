@@ -68,16 +68,19 @@ export default class NihongAIExplainPlugin extends Plugin {
 			{
 				id: "explain",
 				label: "AI 讲解",
+				icon: "sparkles",
 				handler: (text) => this.explain(text),
 			},
 			{
 				id: "translate",
 				label: "翻译",
+				icon: "languages",
 				handler: (text) => this.translate(text),
 			},
 			{
 				id: "lookup",
 				label: "查词典",
+				icon: "book-open",
 				handler: (text) => this.lookup(text),
 			},
 		]);
