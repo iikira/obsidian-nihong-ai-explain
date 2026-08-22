@@ -24,8 +24,6 @@ export interface NihongAIExplainSettings {
 	requestTimeout: number;
 	/** 翻译目标语言 */
 	targetLanguage: string;
-	/** 词典 zip 路径 */
-	dictionaryZipPath: string;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -171,8 +169,6 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	retryInterval: 2000,
 	requestTimeout: 120000,
 	targetLanguage: "中文",
-	dictionaryZipPath:
-		"D:\\obsidian\\jp\\jp\\.obsidian\\plugins\\japanese-popup-dictionary\\jitendex-yomitan.zip",
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -355,16 +351,40 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "离线词典" });
 
 		new Setting(containerEl)
-			.setName("词典 zip 路径")
-			.setDesc("Yomitan 格式 zip 的绝对路径（含 term_bank_*.json）。")
-			.addText((text) =>
-				text
-					.setPlaceholder("D:\\...\\jitendex-yomitan.zip")
-					.setValue(this.plugin.settings.dictionaryZipPath)
-					.onChange(async (value) => {
-						this.plugin.settings.dictionaryZipPath = value.trim();
-						await this.plugin.saveSettings();
-					})
+			.setName("使用方法")
+			.setDesc(
+				"请将 Yomitan 格式 zip（含 term_bank_*.json）复制到本插件目录后，点击下方「导入」。",
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("打开插件目录")
+					.onClick(() => {
+						const dir = this.plugin.manifest.dir;
+						if (!dir) {
+							new Notice("无法获取插件目录");
+							return;
+						}
+						try {
+							const fs = require("node:fs");
+							if (!fs.existsSync(dir)) {
+								new Notice(`插件目录不存在: ${dir}`);
+								return;
+							}
+							// Electron：用 shell.openPath 打开系统资源管理器
+							const electron = require("electron");
+							const shell = electron?.shell;
+							if (shell && typeof shell.openPath === "function") {
+								void shell.openPath(dir);
+							} else {
+								new Notice("无法打开资源管理器，请手动访问: " + dir, 10000);
+							}
+						} catch (e) {
+							new Notice(
+								`打开目录失败: ${e instanceof Error ? e.message : String(e)}`,
+								8000,
+							);
+						}
+					}),
 			);
 
 		const dictStatusSetting = new Setting(containerEl)
@@ -384,14 +404,14 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			}
 			const dicts = await mgr.getDictionaries();
 			dictStatusSetting.setDesc(
-				`已导入 ${dicts.length} 部词典: ${dicts.map((d) => d.title).join(", ")}`
+				`已导入 ${dicts.length} 部词典: ${dicts.map((d) => d.title).join(", ")}`,
 			);
 		};
 		void refreshDictStatus();
 
 		new Setting(containerEl)
 			.setName("导入词典")
-			.setDesc("从配置的 zip 路径导入到 IndexedDB（首次使用或更新词典时点此）。")
+			.setDesc("扫描插件目录下的 zip 文件并导入到 IndexedDB。")
 			.addButton((btn) =>
 				btn
 					.setButtonText("导入")
@@ -402,14 +422,9 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							new Notice("词典管理器未初始化");
 							return;
 						}
-						const path = this.plugin.settings.dictionaryZipPath.trim();
-						if (!path) {
-							new Notice("请先填写词典 zip 路径");
-							return;
-						}
 						btn.setButtonText("导入中…").setDisabled(true);
 						try {
-							await mgr.importFromZip(path);
+							await mgr.importFromPluginDir();
 							await refreshDictStatus();
 						} catch (e) {
 							const msg = e instanceof Error ? e.message : String(e);
@@ -418,7 +433,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						} finally {
 							btn.setButtonText("导入").setDisabled(false);
 						}
-					})
+					}),
 			);
 
 		new Setting(containerEl)
@@ -436,7 +451,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						await mgr.clear();
 						new Notice("已清空词典");
 						await refreshDictStatus();
-					})
+					}),
 			);
 	}
 }

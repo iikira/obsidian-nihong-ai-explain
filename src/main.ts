@@ -48,6 +48,10 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCache = new LRUTranslateCache();
 		this.translateCache.load();
 		this.dictionaryManager = new DictionaryManager();
+		const dir = this.manifest.dir;
+		if (dir) {
+			this.dictionaryManager.setPluginDir(dir);
+		}
 		await this.dictionaryManager.init();
 		this.dictionaryPopup = new DictionaryPopup(
 			(name) => this.dictionaryManager?.getTag(name),
