@@ -56,6 +56,7 @@ export interface ProcessedTag {
 export type StructuredContent =
 	| { type: "text"; text: string }
 	| { type: "structured"; content: ContentNode }
+	| { type: "structured-content"; content: ContentNode }
 	| { type: "link"; href: string; text?: string; content?: ContentNode }
 	| { type: "image"; path: string; title?: string; width?: number; height?: number }
 	| { type: "audio"; path: string; title?: string }

@@ -274,7 +274,8 @@ export class DictionaryPopup {
 				container.appendChild(span);
 				break;
 			}
-			case "structured": {
+			case "structured":
+			case "structured-content": {
 				this.renderContentNode(container, t.content as ContentNode);
 				break;
 			}

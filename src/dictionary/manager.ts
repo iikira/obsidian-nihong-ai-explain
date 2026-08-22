@@ -147,13 +147,20 @@ export class DictionaryManager {
 				const rawTerms = JSON.parse(txt) as RawTermEntry[];
 				const tx = this.db.transaction("terms", "readwrite");
 				for (const entry of rawTerms) {
+					const rest = entry.slice(5);
+					// Jitendex 把整个 glossary 包进单个数组元素（rest[0] 是数组），
+					// 后跟 seqId + attribution；标准 Yomitan 则是展开的多项（string/object）。
+					// 启发式：rest[0] 是数组 → 解包作为 glossary。
+					const glossary: unknown[] = Array.isArray(rest[0])
+						? (rest[0] as unknown[])
+						: rest;
 					const term: ProcessedTerm = {
 						expression: entry[0],
 						reading: entry[1],
 						tags: entry[2] ? entry[2].split(" ") : [],
 						rules: entry[3] ? entry[3].split(" ") : [],
 						score: entry[4],
-						glossary: entry.slice(5),
+						glossary,
 						dictionary: meta.title,
 					};
 					await tx.store.add(term);
