@@ -5,6 +5,7 @@ import {
 	NihongAIExplainSettingTab,
 } from "./settings";
 import { SelectionPill } from "./pill";
+import { TranslateCard } from "./translateCard";
 
 interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -30,14 +31,25 @@ const FORBIDDEN_NAME_CHARS = /[\\/:*?"<>|]/g;
 export default class NihongAIExplainPlugin extends Plugin {
 	settings!: NihongAIExplainSettings;
 	private pill: SelectionPill | null = null;
+	private translateCard: TranslateCard | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 
-		this.pill = new SelectionPill((text) => {
-			void this.explain(text);
-		});
+		this.translateCard = new TranslateCard();
+		this.pill = new SelectionPill([
+			{
+				id: "explain",
+				label: "AI 讲解",
+				handler: (text) => void this.explain(text),
+			},
+			{
+				id: "translate",
+				label: "翻译",
+				handler: (text) => void this.translate(text),
+			},
+		]);
 		this.pill.attach();
 
 		this.registerEvent(
@@ -51,6 +63,12 @@ export default class NihongAIExplainPlugin extends Plugin {
 						.setTitle("AI 讲解此词")
 						.setIcon("sparkles")
 						.onClick(() => void this.explain(sel));
+				});
+				menu.addItem((item) => {
+					item
+						.setTitle("翻译此段")
+						.setIcon("languages")
+						.onClick(() => void this.translate(sel));
 				});
 			})
 		);
@@ -67,11 +85,26 @@ export default class NihongAIExplainPlugin extends Plugin {
 				void this.explain(sel);
 			},
 		});
+
+		this.addCommand({
+			id: "nihong-ai-translate-selection",
+			name: "翻译选中文字",
+			callback: () => {
+				const sel = window.getSelection()?.toString().trim() ?? "";
+				if (!sel) {
+					new Notice("请先选中一段文字");
+					return;
+				}
+				void this.translate(sel);
+			},
+		});
 	}
 
 	onunload(): void {
 		this.pill?.detach();
 		this.pill = null;
+		this.translateCard?.hide();
+		this.translateCard = null;
 	}
 
 	async loadSettings(): Promise<void> {
@@ -132,7 +165,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 	}
 
 	private async callModelOnce(
-		messages: ChatMessage[]
+		messages: ChatMessage[],
+		temperature?: number
 	): Promise<string> {
 		const url = `${this.settings.apiUrl.replace(/\/$/, "")}/chat/completions`;
 		const headers: Record<string, string> = {
@@ -144,7 +178,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		const body = {
 			model: this.settings.modelName,
 			messages,
-			temperature: this.settings.temperature,
+			temperature: temperature ?? this.settings.temperature,
 			stream: false,
 			reasoning_effort: "none",
 		};
@@ -184,13 +218,14 @@ export default class NihongAIExplainPlugin extends Plugin {
 	}
 
 	private async callModelWithRetry(
-		messages: ChatMessage[]
+		messages: ChatMessage[],
+		temperature?: number
 	): Promise<string> {
 		const max = Math.max(0, this.settings.maxRetries);
 		let lastErr: unknown = null;
 		for (let attempt = 1; attempt <= max; attempt++) {
 			try {
-				return await this.callModelOnce(messages);
+				return await this.callModelOnce(messages, temperature);
 			} catch (e) {
 				lastErr = e;
 				const msg = e instanceof Error ? e.message : String(e);
@@ -250,5 +285,63 @@ export default class NihongAIExplainPlugin extends Plugin {
 		}
 
 		new Notice(`已生成: ${targetPath}`);
+	}
+
+	async translate(text: string): Promise<void> {
+		const clean = text.trim();
+		if (!clean) {
+			new Notice("选区为空");
+			return;
+		}
+		if (!this.translateCard) {
+			this.translateCard = new TranslateCard();
+		}
+
+		const rect = this.getSelectionRect();
+		this.translateCard.showLoading(rect ?? this.fallbackRect());
+
+		const target = this.settings.targetLanguage || "中文";
+		const messages: ChatMessage[] = [
+			{
+				role: "system",
+				content:
+					`你是一位专业译者。请将用户给出的文本翻译为${target}。` +
+					`要求：1) 只输出译文，不要输出任何解释、注释、引号、前后缀或寒暄；` +
+					`2) 保留原文的换行与段落结构；3) 保持自然、地道、忠实于原文语感。`,
+			},
+			{ role: "user", content: clean },
+		];
+
+		try {
+			const result = await this.callModelWithRetry(messages, 0.3);
+			const rectNow = this.getSelectionRect() ?? rect ?? this.fallbackRect();
+			this.translateCard.showResult(result, rectNow);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			const rectNow = this.getSelectionRect() ?? rect ?? this.fallbackRect();
+			this.translateCard.showError(`翻译失败: ${msg}`, rectNow);
+			console.error("[nihong-ai-explain] 翻译失败:", e);
+		}
+	}
+
+	private getSelectionRect(): DOMRect | null {
+		const sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) {
+			return null;
+		}
+		const rect = sel.getRangeAt(0).getBoundingClientRect();
+		if (!rect || (rect.width === 0 && rect.height === 0)) {
+			return null;
+		}
+		return rect;
+	}
+
+	private fallbackRect(): DOMRect {
+		return new DOMRect(
+			window.innerWidth / 2 - 150,
+			window.innerHeight / 2 - 60,
+			300,
+			40
+		);
 	}
 }

@@ -22,6 +22,8 @@ export interface NihongAIExplainSettings {
 	retryInterval: number;
 	/** 单次请求超时（毫秒） */
 	requestTimeout: number;
+	/** 翻译目标语言 */
+	targetLanguage: string;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -35,6 +37,10 @@ const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给
 > 开篇直接以「## 一、词性与含义」起始，**不要**输出任何标题行（如「**「寄る（よる）」详解**」）和其下的分隔线 \`---\`。整篇以「## 一、」开始，以「## 六、语感」段落结束。
 
 ## 一、词性与含义
+
+**{单词}（{假名读音}）**
+
+> 单词含汉字时，必须以「汉字（假名）」形式给出读音，例如「寄る（よる）」「夫婦（ふうふ）」「結ぶ（むすぶ）」；单词本身即为假名时仍写出该假名，例如「かる（かる）」。后续各节出现该词的汉字形式时，亦须附上假名读音。
 
 **{词性}**
 
@@ -133,7 +139,7 @@ const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给
 
 ## 规则
 
-1. **读音**：模板各处假名读音必须准确；如单词本身即为假名，可省略或补汉字。
+1. **读音**：模板各处假名读音必须准确。**「## 一、词性与含义」节标题行之下必须以「汉字（假名）」形式给出该单词的读音**（例如「寄る（よる）」「夫婦（ふうふ）」「結ぶ（むすぶ）」）；单词本身仅为假名时仍写出该假名（例如「かる（かる）」）。后续各节出现该词的汉字形式时，亦须附上假名读音。
 2. **动词变形处理（重点）**：用户输入可能是动词的各种变形（ます形/て形/た形/ない形/可能形/受身形/使役形/命令形/假定形/意向形等）。无论输入为何种变形：
    - 必须先识别并还原其**辞书形（原型）**，全程围绕**原型**展开讲解（词性、含义、用法、例句一律使用原型）。
    - 在「## 一、词性与含义」节首行用一句话说明：「输入「{用户原输入}」为动词「{原型}」的{变形种类}形，以下以原型「{原型}」进行讲解。」之后再写词性与含义。
@@ -162,6 +168,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	maxRetries: 3,
 	retryInterval: 2000,
 	requestTimeout: 120000,
+	targetLanguage: "中文",
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -308,6 +315,19 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						const n = Math.max(1000, Math.floor(Number(value) || 0));
 						this.plugin.settings.requestTimeout = n;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("翻译目标语言")
+			.setDesc("翻译功能的目标语言，如「中文」「英文」等。")
+			.addText((text) =>
+				text
+					.setPlaceholder("中文")
+					.setValue(this.plugin.settings.targetLanguage)
+					.onChange(async (value) => {
+						this.plugin.settings.targetLanguage = value.trim() || "中文";
 						await this.plugin.saveSettings();
 					})
 			);
