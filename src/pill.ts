@@ -33,7 +33,7 @@ export interface PillAction {
 	id: string;
 	label: string;
 	icon?: string;
-	handler: (text: string) => void;
+	handler: (text: string) => Promise<void> | void;
 }
 
 /**
@@ -195,13 +195,42 @@ export class SelectionPill {
 			btn.addEventListener("click", (ev) => {
 				ev.preventDefault();
 				ev.stopPropagation();
-				const text = this.currentSelection || this.readSelection() || "";
-				if (text) {
-					action.handler(text);
+				if (btn.getAttribute("data-busy") === "true") {
+					return;
 				}
+				const text = this.currentSelection || this.readSelection() || "";
+				if (!text) {
+					return;
+				}
+				this.markBusy(btn, true);
+				// 禁用整组按钮，防止并排点另一个
+				this.markAllBusy(lePill, true);
+				Promise.resolve(action.handler(text)).finally(() => {
+					this.markAllBusy(lePill, false);
+				});
 			});
 			lePill.appendChild(btn);
 		}
+	}
+
+	private markBusy(el: HTMLElement, busy: boolean): void {
+		if (busy) {
+			el.setAttribute("data-busy", "true");
+			el.style.opacity = "0.5";
+			el.style.pointerEvents = "none";
+		} else {
+			el.removeAttribute("data-busy");
+			el.style.opacity = "";
+			el.style.pointerEvents = "";
+		}
+	}
+
+	private markAllBusy(pill: Element, busy: boolean): void {
+		pill.querySelectorAll(`[${ACTION_ATTR}]`).forEach((el) => {
+			if (el instanceof HTMLElement) {
+				this.markBusy(el, busy);
+			}
+		});
 	}
 
 	// ====== Fallback pill（lexis 未弹时） ======
@@ -255,12 +284,20 @@ export class SelectionPill {
 			btn.addEventListener("click", (ev) => {
 				ev.preventDefault();
 				ev.stopPropagation();
-				const text = this.currentSelection;
-				this.hideFallback();
-				this.currentSelection = "";
-				if (text) {
-					action.handler(text);
+				if (btn.getAttribute("data-busy") === "true") {
+					return;
 				}
+				const text = this.currentSelection;
+				if (!text) {
+					return;
+				}
+				this.markBusy(btn, true);
+				this.markAllBusy(div, true);
+				Promise.resolve(action.handler(text)).finally(() => {
+					this.markAllBusy(div, false);
+					this.hideFallback();
+					this.currentSelection = "";
+				});
 			});
 			div.appendChild(btn);
 		}
