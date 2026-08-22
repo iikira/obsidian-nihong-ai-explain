@@ -202,11 +202,10 @@ export class SelectionPill {
 				if (!text) {
 					return;
 				}
-				this.markBusy(btn, true);
-				// 禁用整组按钮，防止并排点另一个
-				this.markAllBusy(lePill, true);
+				// 禁用整个 pill（含 lexis 自家按钮），防止重复调用
+				this.markPillBusy(lePill, true);
 				Promise.resolve(action.handler(text)).finally(() => {
-					this.markAllBusy(lePill, false);
+					this.markPillBusy(lePill, false);
 				});
 			});
 			lePill.appendChild(btn);
@@ -225,8 +224,10 @@ export class SelectionPill {
 		}
 	}
 
-	private markAllBusy(pill: Element, busy: boolean): void {
-		pill.querySelectorAll(`[${ACTION_ATTR}]`).forEach((el) => {
+	/** 禁用 pill 内所有按钮（含 lexis 自家按钮与我们注入的按钮） */
+	private markPillBusy(pill: Element, busy: boolean): void {
+		const btns = pill.querySelectorAll(".lexis-sel-pill-btn, .nihong-ai-pill-btn");
+		btns.forEach((el) => {
 			if (el instanceof HTMLElement) {
 				this.markBusy(el, busy);
 			}
@@ -291,10 +292,10 @@ export class SelectionPill {
 				if (!text) {
 					return;
 				}
-				this.markBusy(btn, true);
-				this.markAllBusy(div, true);
+				// 禁用整个 pill 所有按钮，防止重复调用
+				this.markPillBusy(div, true);
 				Promise.resolve(action.handler(text)).finally(() => {
-					this.markAllBusy(div, false);
+					this.markPillBusy(div, false);
 					this.hideFallback();
 					this.currentSelection = "";
 				});
