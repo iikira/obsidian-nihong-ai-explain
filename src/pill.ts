@@ -216,6 +216,52 @@ export class SelectionPill {
 			});
 			lePill.appendChild(btn);
 		}
+
+		// 注入新按钮后 pill 变宽，lexis 用旧宽度算的 left 已失效，重新定位防出屏
+		this.repositionPill(lePill);
+	}
+
+	/** 重新定位 pill，确保不出视口；选区底部空间不足时弹到选区上方 */
+	private repositionPill(pill: Element): void {
+		const sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) {
+			return;
+		}
+		const rect = sel.getRangeAt(0).getBoundingClientRect();
+		if (!rect || (rect.width === 0 && rect.height === 0)) {
+			return;
+		}
+		const el = pill as HTMLElement;
+		// 强制布局以拿真实尺寸
+		const pw = el.offsetWidth;
+		const ph = el.offsetHeight;
+		if (pw === 0 || ph === 0) {
+			// 尚未布局，下一帧再试
+			requestAnimationFrame(() => this.repositionPill(pill));
+			return;
+		}
+		const margin = 6;
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+		// 水平：默认贴选区左边缘，右溢出则左移，仍超宽则贴左 6px
+		let left = Math.max(margin, Math.min(rect.left, vw - pw - margin));
+		if (rect.left + pw > vw - margin) {
+			// 右边放不下：尝试向左对齐选区右边缘
+			left = Math.max(margin, rect.right - pw);
+		}
+		// 垂直：默认选区下方，下方不够则上方
+		let top = rect.bottom + margin;
+		if (top + ph > vh - margin) {
+			const above = rect.top - ph - margin;
+			if (above >= margin) {
+				top = above;
+			} else {
+				// 上下都紧：贴底
+				top = Math.max(margin, vh - ph - margin);
+			}
+		}
+		el.style.top = `${top}px`;
+		el.style.left = `${left}px`;
 	}
 
 	private markBusy(el: HTMLElement, busy: boolean): void {
