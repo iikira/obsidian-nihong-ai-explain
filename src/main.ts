@@ -49,8 +49,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCache.load();
 		this.dictionaryManager = new DictionaryManager();
 		await this.dictionaryManager.init();
-		this.dictionaryPopup = new DictionaryPopup((name) =>
-			this.dictionaryManager?.getTag(name)
+		this.dictionaryPopup = new DictionaryPopup(
+			(name) => this.dictionaryManager?.getTag(name),
+			(query) => this.lookupInPopup(query),
 		);
 		this.pill = new SelectionPill([
 			{
@@ -410,8 +411,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 			return;
 		}
 		if (!this.dictionaryPopup) {
-			this.dictionaryPopup = new DictionaryPopup((name) =>
-				this.dictionaryManager?.getTag(name)
+			this.dictionaryPopup = new DictionaryPopup(
+				(name) => this.dictionaryManager?.getTag(name),
+				(query) => this.lookupInPopup(query),
 			);
 		}
 
@@ -427,6 +429,24 @@ export default class NihongAIExplainPlugin extends Plugin {
 			const rectNow = this.getSelectionRect() ?? rect;
 			this.dictionaryPopup.showError(`查询失败: ${msg}`, rectNow);
 			console.error("[nihong-ai-explain] 词典查询失败:", e);
+		}
+	}
+
+	/** 卡片内交叉引用点击触发的重新查询，复用卡片当前位置而非选区 */
+	private async lookupInPopup(query: string): Promise<void> {
+		const clean = query.trim();
+		if (!clean || !this.dictionaryManager || !this.dictionaryPopup) {
+			return;
+		}
+		const rect = this.dictionaryPopup.getRect() ?? centerRect();
+		this.dictionaryPopup.showLoading(rect);
+		try {
+			const results = await this.dictionaryManager.lookup(clean);
+			this.dictionaryPopup.showResult(results, rect);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			this.dictionaryPopup.showError(`查询失败: ${msg}`, rect);
+			console.error("[nihong-ai-explain] 词典交叉引用查询失败:", e);
 		}
 	}
 

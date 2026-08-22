@@ -18,8 +18,14 @@ export class DictionaryPopup {
 	private copyHandler = (e: ClipboardEvent): void => {
 		this.sanitizeCopy(e);
 	};
+	private clickHandler = (e: MouseEvent): void => {
+		this.handleLinkClick(e);
+	};
 
-	constructor(private getTag: (name: string) => ProcessedTag | undefined) {}
+	constructor(
+		private getTag: (name: string) => ProcessedTag | undefined,
+		private onNavigate?: (query: string) => void,
+	) {}
 
 	showLoading(rect: DOMRect): void {
 		this.ensureEl();
@@ -46,9 +52,18 @@ export class DictionaryPopup {
 		this.attachHideListeners();
 	}
 
+	/** 获取卡片当前 bounding rect，供交叉引用重查复用 */
+	getRect(): DOMRect | null {
+		if (!this.el || this.el.style.display === "none") {
+			return null;
+		}
+		return this.el.getBoundingClientRect();
+	}
+
 	hide(): void {
 		if (this.el) {
 			this.el.removeEventListener("copy", this.copyHandler);
+			this.el.removeEventListener("click", this.clickHandler);
 			this.el.remove();
 			this.el = null;
 		}
@@ -367,6 +382,15 @@ export class DictionaryPopup {
 	}
 
 	private attachHideListeners(): void {
+		// 先卸载旧监听，避免 lookupInPopup 重查时累积重复绑定
+		document.removeEventListener("scroll", this.scrollHandler, true);
+		if (this.externalClickHandler) {
+			document.removeEventListener("mousedown", this.externalClickHandler);
+		}
+		if (this.el) {
+			this.el.removeEventListener("copy", this.copyHandler);
+			this.el.removeEventListener("click", this.clickHandler);
+		}
 		document.addEventListener("scroll", this.scrollHandler, true);
 		this.externalClickHandler = (e: MouseEvent): void => {
 			if (e.target instanceof Element && e.target.closest(`.${CARD_CLASS}`)) {
@@ -377,7 +401,37 @@ export class DictionaryPopup {
 		document.addEventListener("mousedown", this.externalClickHandler);
 		if (this.el) {
 			this.el.addEventListener("copy", this.copyHandler);
+			this.el.addEventListener("click", this.clickHandler);
 		}
+	}
+
+	/** 拦截交叉引用/外链点击，防止 Obsidian 把 ?query= 当 vault 文件路径解析导致崩溃 */
+	private handleLinkClick(e: MouseEvent): void {
+		const target = e.target;
+		if (!(target instanceof Element)) {
+			return;
+		}
+		const anchor = target.closest("a");
+		if (!anchor) {
+			return;
+		}
+		e.preventDefault();
+		e.stopPropagation();
+		const href = anchor.getAttribute("href") ?? "";
+		if (href.startsWith("?")) {
+			// Yomitan 内部交叉引用：?query=WORD&wildcards=off&...
+			const params = new URLSearchParams(href.slice(1));
+			const query = params.get("query");
+			if (query && this.onNavigate) {
+				this.onNavigate(decodeURIComponent(query));
+			}
+			return;
+		}
+		if (/^https?:\/\//i.test(href)) {
+			window.open(href, "_blank", "noopener,noreferrer");
+			return;
+		}
+		// 其他不识别的链接不导航
 	}
 
 	/** 复制时剥离振假名 <rt>，只留汉字本体 */
