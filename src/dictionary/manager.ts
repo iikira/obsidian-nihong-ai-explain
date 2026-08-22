@@ -1,7 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { unzipSync } from "fflate";
-import { FileSystemAdapter, Notice } from "obsidian";
-import type { App } from "obsidian";
+import { Notice } from "obsidian";
 import { Deinflector } from "./deinflector";
 import type {
 	DictionaryMeta,
@@ -35,10 +34,8 @@ export class DictionaryManager {
 	private db: IDBPDatabase<YomitanDB> | null = null;
 	private deinflector: Deinflector;
 	private tagCache: Map<string, ProcessedTag> = new Map();
-	private app: App;
 
-	constructor(app: App) {
-		this.app = app;
+	constructor() {
 		this.deinflector = new Deinflector();
 	}
 
@@ -96,17 +93,19 @@ export class DictionaryManager {
 		this.tagCache.clear();
 	}
 
-	/** 从 zip 路径导入词典 */
+	/** 从 zip 路径导入词典（支持绝对路径） */
 	async importFromZip(zipPath: string): Promise<void> {
 		if (!this.db) {
 			throw new Error("IndexedDB 未初始化");
 		}
-		const adapter = this.app.vault.adapter;
-		if (!(adapter instanceof FileSystemAdapter)) {
-			throw new Error("需要桌面端（文件系统适配器）");
+		let fs: typeof import("node:fs");
+		try {
+			fs = require("node:fs");
+		} catch (_e) {
+			throw new Error("当前平台不支持读取本地文件（需桌面端）");
 		}
 		try {
-			const buf = await adapter.readBinary(zipPath);
+			const buf = fs.readFileSync(zipPath);
 			const files = unzipSync(new Uint8Array(buf));
 			await this.processZipFiles(files);
 		} catch (e) {

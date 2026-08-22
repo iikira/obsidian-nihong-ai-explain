@@ -1,4 +1,4 @@
-import { positionCard } from "./popupUtils";
+import { positionCard } from "../popupUtils";
 import { getFuriganaSegments } from "./furigana";
 import type { LookupResult, ProcessedTag, StructuredContent, ContentNode } from "./types";
 

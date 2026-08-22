@@ -7,8 +7,8 @@ import {
 import { SelectionPill } from "./pill";
 import { TranslateCard } from "./translateCard";
 import { LRUTranslateCache } from "./translateCache";
-import { DictionaryManager } from "./dictionaryManager";
-import { DictionaryPopup } from "./dictionaryPopup";
+import { DictionaryManager } from "./dictionary/manager";
+import { DictionaryPopup } from "./dictionary/popup";
 import { centerRect } from "./popupUtils";
 
 interface ChatMessage {
@@ -47,7 +47,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCard = new TranslateCard();
 		this.translateCache = new LRUTranslateCache();
 		this.translateCache.load();
-		this.dictionaryManager = new DictionaryManager(this.app);
+		this.dictionaryManager = new DictionaryManager();
 		await this.dictionaryManager.init();
 		this.dictionaryPopup = new DictionaryPopup((name) =>
 			this.dictionaryManager?.getTag(name)
