@@ -207,6 +207,10 @@ export class SelectionPill {
 	// ====== Fallback pill（lexis 未弹时） ======
 
 	private showFallback(): void {
+		// 双保险：若 lexis 已弹 pill，不弹自家 fallback，避免重复
+		if (document.querySelector(LEXIS_PILL_SELECTOR)) {
+			return;
+		}
 		const sel = window.getSelection();
 		if (!sel || sel.rangeCount === 0) {
 			return;

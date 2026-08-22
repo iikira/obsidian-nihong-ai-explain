@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 
 export interface NihongAIExplainSettings {
@@ -329,6 +329,20 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.targetLanguage = value.trim() || "中文";
 						await this.plugin.saveSettings();
+					})
+			);
+
+		const cacheSetting = new Setting(containerEl)
+			.setName("翻译缓存")
+			.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 ${this.plugin.translateCache?.size() ?? 0} 条。`)
+			.addButton((btn) =>
+				btn
+					.setButtonText("清空缓存")
+					.setWarning()
+					.onClick(async () => {
+						this.plugin.translateCache?.clear();
+						new Notice("已清空翻译缓存");
+						cacheSetting.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 0 条。`);
 					})
 			);
 	}

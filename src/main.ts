@@ -6,6 +6,7 @@ import {
 } from "./settings";
 import { SelectionPill } from "./pill";
 import { TranslateCard } from "./translateCard";
+import { LRUTranslateCache } from "./translateCache";
 
 interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -32,12 +33,15 @@ export default class NihongAIExplainPlugin extends Plugin {
 	settings!: NihongAIExplainSettings;
 	private pill: SelectionPill | null = null;
 	private translateCard: TranslateCard | null = null;
+	translateCache: LRUTranslateCache | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 
 		this.translateCard = new TranslateCard();
+		this.translateCache = new LRUTranslateCache();
+		this.translateCache.load();
 		this.pill = new SelectionPill([
 			{
 				id: "explain",
@@ -105,6 +109,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.pill = null;
 		this.translateCard?.hide();
 		this.translateCard = null;
+		this.translateCache?.flush();
+		this.translateCache = null;
 	}
 
 	async loadSettings(): Promise<void> {
@@ -296,11 +302,24 @@ export default class NihongAIExplainPlugin extends Plugin {
 		if (!this.translateCard) {
 			this.translateCard = new TranslateCard();
 		}
-
-		const rect = this.getSelectionRect();
-		this.translateCard.showLoading(rect ?? this.fallbackRect());
+		if (!this.translateCache) {
+			this.translateCache = new LRUTranslateCache();
+			this.translateCache.load();
+		}
 
 		const target = this.settings.targetLanguage || "中文";
+		const cacheKey = JSON.stringify({ text: clean, target });
+		const rect = this.getSelectionRect() ?? this.fallbackRect();
+
+		// 缓存命中：静默显示，无任何提示
+		const cached = this.translateCache.get(cacheKey);
+		if (cached != null) {
+			this.translateCard.showResult(cached, rect);
+			return;
+		}
+
+		this.translateCard.showLoading(rect);
+
 		const messages: ChatMessage[] = [
 			{
 				role: "system",
@@ -314,11 +333,12 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 		try {
 			const result = await this.callModelWithRetry(messages, 0.3);
-			const rectNow = this.getSelectionRect() ?? rect ?? this.fallbackRect();
+			this.translateCache.set(cacheKey, result);
+			const rectNow = this.getSelectionRect() ?? rect;
 			this.translateCard.showResult(result, rectNow);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
-			const rectNow = this.getSelectionRect() ?? rect ?? this.fallbackRect();
+			const rectNow = this.getSelectionRect() ?? rect;
 			this.translateCard.showError(`翻译失败: ${msg}`, rectNow);
 			console.error("[nihong-ai-explain] 翻译失败:", e);
 		}
