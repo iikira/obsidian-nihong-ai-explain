@@ -12,11 +12,21 @@ const SELECTOR_HOSTS = [
 const FALLBACK_DELAY_MS = 150;
 
 function inHost(node: Node | null): boolean {
-	if (!node || node.nodeType !== Node.ELEMENT_NODE) {
+	if (!node) {
 		return false;
 	}
-	const el = node as Element;
-	return SELECTOR_HOSTS.some((sel) => el.closest(sel) != null);
+	let el: Element | null;
+	if (node.nodeType === Node.ELEMENT_NODE) {
+		el = node as Element;
+	} else if (node.nodeType === Node.TEXT_NODE) {
+		el = node.parentElement;
+	} else {
+		return false;
+	}
+	if (!el) {
+		return false;
+	}
+	return SELECTOR_HOSTS.some((sel) => el!.closest(sel) != null);
 }
 
 export interface PillAction {
@@ -70,7 +80,6 @@ export class SelectionPill {
 					}
 					const el = node as Element;
 					if (el.matches?.(LEXIS_PILL_SELECTOR)) {
-						console.log("[nihong-ai] MutationObserver detected lexis pill:", el);
 						this.injectInto(el);
 					}
 				});
@@ -174,8 +183,6 @@ export class SelectionPill {
 		this.clearFallbackTimer();
 		this.hideFallback();
 
-		console.log("[nihong-ai] injectInto called, currentSelection=", this.currentSelection);
-
 		for (const action of this.actions) {
 			if (lePill.querySelector(`[${ACTION_ATTR}="${action.id}"]`)) {
 				continue; // 已注入
@@ -186,18 +193,14 @@ export class SelectionPill {
 			btn.textContent = action.label;
 			btn.title = action.label;
 			btn.addEventListener("click", (ev) => {
-				console.log("[nihong-ai] injected button click, action=", action.id, "currentSelection=", this.currentSelection);
 				ev.preventDefault();
 				ev.stopPropagation();
 				const text = this.currentSelection || this.readSelection() || "";
 				if (text) {
 					action.handler(text);
-				} else {
-					console.warn("[nihong-ai] no selection text when button clicked");
 				}
 			});
 			lePill.appendChild(btn);
-			console.log("[nihong-ai] injected button:", action.id, "into", lePill);
 		}
 	}
 
