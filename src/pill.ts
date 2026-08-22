@@ -12,6 +12,7 @@ const SELECTOR_HOSTS = [
 ];
 
 const FALLBACK_DELAY_MS = 150;
+const SELECTION_DEBOUNCE_MS = 300;
 
 function inHost(node: Node | null): boolean {
 	if (!node) {
@@ -53,6 +54,7 @@ export class SelectionPill {
 	private fallbackEl: HTMLDivElement | null = null;
 	private observer: MutationObserver | null = null;
 	private pendingFallbackTimer: number | null = null;
+	private pendingSelectionDebounce: number | null = null;
 	private currentSelection = "";
 
 	private boundMouseUp: (e: MouseEvent) => void;
@@ -98,6 +100,7 @@ export class SelectionPill {
 		this.observer?.disconnect();
 		this.observer = null;
 		this.clearFallbackTimer();
+		this.clearSelectionDebounce();
 		this.hideFallback();
 	}
 
@@ -126,7 +129,14 @@ export class SelectionPill {
 			return;
 		}
 		this.currentSelection = sel;
-		// 等 lexis pill；若超时未出现则 fallback
+		this.scheduleShowAfterSelection();
+	}
+
+	/**
+	 * 选区确定后启动 fallback 计时：等 FALLBACK_DELAY_MS 看 lexis 是否弹 pill，
+	 * 未弹则自己 fallback。mouseup（桌面）与 selectionchange 去抖（移动）共用此逻辑。
+	 */
+	private scheduleShowAfterSelection(): void {
 		this.clearFallbackTimer();
 		this.pendingFallbackTimer = window.setTimeout(() => {
 			// lexis 未弹 pill（或选区被其规则拒绝），自己弹
@@ -140,9 +150,27 @@ export class SelectionPill {
 	private onSelectionChange(): void {
 		const sel = this.readSelection();
 		if (sel == null) {
+			this.clearSelectionDebounce();
 			this.hideFallback();
 			this.currentSelection = "";
+			return;
 		}
+		// 移动端选区确定后 mouseup 不一定触发，用 selectionchange 兜底。
+		// 去抖 SELECTION_DEBOUNCE_MS 避免拖选过程中频繁触发，且让选区稳定。
+		this.clearSelectionDebounce();
+		this.pendingSelectionDebounce = window.setTimeout(() => {
+			this.pendingSelectionDebounce = null;
+			// 去抖结束后再次校验选区仍有效（用户可能中途清空了）
+			const cur = this.readSelection();
+			if (cur == null) {
+				this.hideFallback();
+				this.currentSelection = "";
+				return;
+			}
+			this.currentSelection = cur;
+			// 复用 mouseup 的"等 lexis / fallback"逻辑
+			this.scheduleShowAfterSelection();
+		}, SELECTION_DEBOUNCE_MS);
 	}
 
 	private onScroll(): void {
@@ -372,6 +400,13 @@ export class SelectionPill {
 		if (this.pendingFallbackTimer != null) {
 			clearTimeout(this.pendingFallbackTimer);
 			this.pendingFallbackTimer = null;
+		}
+	}
+
+	private clearSelectionDebounce(): void {
+		if (this.pendingSelectionDebounce != null) {
+			clearTimeout(this.pendingSelectionDebounce);
+			this.pendingSelectionDebounce = null;
 		}
 	}
 }
