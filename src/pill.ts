@@ -70,6 +70,7 @@ export class SelectionPill {
 					}
 					const el = node as Element;
 					if (el.matches?.(LEXIS_PILL_SELECTOR)) {
+						console.log("[nihong-ai] MutationObserver detected lexis pill:", el);
 						this.injectInto(el);
 					}
 				});
@@ -173,24 +174,30 @@ export class SelectionPill {
 		this.clearFallbackTimer();
 		this.hideFallback();
 
+		console.log("[nihong-ai] injectInto called, currentSelection=", this.currentSelection);
+
 		for (const action of this.actions) {
 			if (lePill.querySelector(`[${ACTION_ATTR}="${action.id}"]`)) {
 				continue; // 已注入
 			}
-			const btn = document.createElement("div");
+			const btn = document.createElement("span");
 			btn.className = "lexis-sel-pill-btn";
 			btn.setAttribute(ACTION_ATTR, action.id);
 			btn.textContent = action.label;
 			btn.title = action.label;
 			btn.addEventListener("click", (ev) => {
+				console.log("[nihong-ai] injected button click, action=", action.id, "currentSelection=", this.currentSelection);
 				ev.preventDefault();
 				ev.stopPropagation();
 				const text = this.currentSelection || this.readSelection() || "";
 				if (text) {
 					action.handler(text);
+				} else {
+					console.warn("[nihong-ai] no selection text when button clicked");
 				}
 			});
 			lePill.appendChild(btn);
+			console.log("[nihong-ai] injected button:", action.id, "into", lePill);
 		}
 	}
 
