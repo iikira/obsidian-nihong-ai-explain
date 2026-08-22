@@ -359,9 +359,9 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				btn
 					.setButtonText("打开插件目录")
 					.onClick(() => {
-						const dir = this.plugin.manifest.dir;
+						const dir = this.plugin.getPluginDir();
 						if (!dir) {
-							new Notice("无法获取插件目录");
+							new Notice("无法获取插件目录（需桌面端）");
 							return;
 						}
 						try {

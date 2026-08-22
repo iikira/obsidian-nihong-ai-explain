@@ -1,4 +1,11 @@
-import { Notice, Plugin, TFile, normalizePath, requestUrl } from "obsidian";
+import {
+	Notice,
+	Plugin,
+	TFile,
+	FileSystemAdapter,
+	normalizePath,
+	requestUrl,
+} from "obsidian";
 import {
 	DEFAULT_SETTINGS,
 	NihongAIExplainSettings,
@@ -48,7 +55,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCache = new LRUTranslateCache();
 		this.translateCache.load();
 		this.dictionaryManager = new DictionaryManager();
-		const dir = this.manifest.dir;
+		const dir = this.getPluginDir();
 		if (dir) {
 			this.dictionaryManager.setPluginDir(dir);
 		}
@@ -468,5 +475,19 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	private fallbackRect(): DOMRect {
 		return centerRect();
+	}
+
+	/** 获取插件目录的绝对路径（vault 根 + manifest.dir） */
+	getPluginDir(): string | null {
+		const rel = this.manifest.dir;
+		if (!rel) {
+			return null;
+		}
+		const adapter = this.app.vault.adapter;
+		if (!(adapter instanceof FileSystemAdapter)) {
+			return null;
+		}
+		const pathMod = require("node:path");
+		return pathMod.join(adapter.getBasePath(), rel);
 	}
 }
