@@ -1,6 +1,5 @@
 import esbuild from "esbuild";
 import process from "process";
-import builtins from "builtin-modules";
 import { cpSync, mkdirSync, rmSync } from "node:fs";
 
 const banner = `/*
@@ -32,7 +31,7 @@ const context = await esbuild.context({
 	entryPoints: ["src/main.ts"],
 	banner: { js: banner },
 	target: "es2018",
-	platform: "node",
+	platform: "browser",
 	format: "cjs",
 	bundle: true,
 	external: [
@@ -49,7 +48,6 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		...builtins
 	],
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",

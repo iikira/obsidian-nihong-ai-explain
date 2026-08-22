@@ -1,6 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { unzipSync } from "fflate";
-import { Notice } from "obsidian";
+import { Notice, normalizePath, type App } from "obsidian";
 import { Deinflector } from "./deinflector";
 import type {
 	DictionaryMeta,
@@ -34,10 +34,15 @@ export class DictionaryManager {
 	private db: IDBPDatabase<YomitanDB> | null = null;
 	private deinflector: Deinflector;
 	private tagCache: Map<string, ProcessedTag> = new Map();
+	private app: App | null = null;
 	private pluginDir: string | null = null;
 
 	constructor() {
 		this.deinflector = new Deinflector();
+	}
+
+	setApp(app: App): void {
+		this.app = app;
 	}
 
 	setPluginDir(dir: string): void {
@@ -103,46 +108,45 @@ export class DictionaryManager {
 		if (!this.db) {
 			throw new Error("IndexedDB 未初始化");
 		}
+		if (!this.app) {
+			throw new Error("App 未注入");
+		}
 		if (!this.pluginDir) {
 			throw new Error("插件目录未配置");
 		}
-		let fs: typeof import("node:fs");
-		let pathMod: typeof import("node:path");
+		const adapter = this.app.vault.adapter;
+		const dir = normalizePath(this.pluginDir);
+		// 列出插件目录下所有文件
+		let listed: { files: string[]; folders: string[] };
 		try {
-			fs = require("node:fs");
-			pathMod = require("node:path");
-		} catch (_e) {
-			throw new Error("当前平台不支持读取本地文件（需桌面端）");
-		}
-		let zipPath: string | null = null;
-		try {
-			const entries = fs.readdirSync(this.pluginDir);
-			const zips = entries
-				.filter((f) => f.toLowerCase().endsWith(".zip"))
-				.map((f) => pathMod.join(this.pluginDir!, f));
-			if (zips.length === 0) {
-				throw new Error(
-					`插件目录下未找到 zip 文件，请先将词典 zip 复制到: ${this.pluginDir}`,
-				);
-			}
-			if (zips.length > 1) {
-				throw new Error(
-					`插件目录下存在多个 zip 文件，请只保留一个: ${zips.join(", ")}`,
-				);
-			}
-			zipPath = zips[0];
+			listed = await adapter.list(dir);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
 			throw new Error(`扫描插件目录失败: ${msg}`);
 		}
+		const zips = listed.files
+			.filter((name) => name.toLowerCase().endsWith(".zip"))
+			.map((name) => normalizePath(`${dir}/${name}`));
+		if (zips.length === 0) {
+			throw new Error(
+				`插件目录下未找到 zip 文件，请先将词典 zip 复制到: ${dir}`,
+			);
+		}
+		if (zips.length > 1) {
+			throw new Error(
+				`插件目录下存在多个 zip 文件，请只保留一个: ${zips.join(", ")}`,
+			);
+		}
+		const zipPath = zips[0];
+		let buf: ArrayBuffer;
 		try {
-			const buf = fs.readFileSync(zipPath);
-			const files = unzipSync(new Uint8Array(buf));
-			await this.processZipFiles(files);
+			buf = await adapter.readBinary(zipPath);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
 			throw new Error(`读取 zip 失败: ${msg}`);
 		}
+		const files = unzipSync(new Uint8Array(buf));
+		await this.processZipFiles(files);
 	}
 
 	private async processZipFiles(files: Record<string, Uint8Array>): Promise<void> {

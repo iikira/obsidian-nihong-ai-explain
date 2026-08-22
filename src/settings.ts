@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 
 export interface NihongAIExplainSettings {
@@ -359,19 +359,40 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				btn
 					.setButtonText("打开插件目录")
 					.onClick(() => {
+						// 移动端：无法打开系统资源管理器，Notice 显示路径供用户复制
+						if (Platform.isMobileApp) {
+							const rel = this.plugin.getPluginDirRelative() ?? "(未知)";
+							new Notice(
+								`移动端无法直接打开目录，请用文件管理器把 zip 复制到: vault/${rel}/`,
+								12000,
+							);
+							return;
+						}
+						// 桌面端：Electron shell.openPath 打开资源管理器
 						const dir = this.plugin.getPluginDir();
 						if (!dir) {
 							new Notice("无法获取插件目录（需桌面端）");
 							return;
 						}
 						try {
-							const fs = require("node:fs");
+							// 动态 require 避开 esbuild 静态分析
+							const dynamicRequire = new Function(
+								"return typeof require !== 'undefined' ? require : undefined",
+							)() as ((m: string) => unknown) | undefined;
+							if (!dynamicRequire) {
+								new Notice("当前环境不支持打开目录，路径: " + dir, 10000);
+								return;
+							}
+							const fs = dynamicRequire("node:fs") as {
+								existsSync: (p: string) => boolean;
+							};
 							if (!fs.existsSync(dir)) {
 								new Notice(`插件目录不存在: ${dir}`);
 								return;
 							}
-							// Electron：用 shell.openPath 打开系统资源管理器
-							const electron = require("electron");
+							const electron = dynamicRequire("electron") as {
+								shell?: { openPath?: (p: string) => void };
+							};
 							const shell = electron?.shell;
 							if (shell && typeof shell.openPath === "function") {
 								void shell.openPath(dir);

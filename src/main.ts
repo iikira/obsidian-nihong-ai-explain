@@ -55,9 +55,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCache = new LRUTranslateCache();
 		this.translateCache.load();
 		this.dictionaryManager = new DictionaryManager();
-		const dir = this.getPluginDir();
-		if (dir) {
-			this.dictionaryManager.setPluginDir(dir);
+		this.dictionaryManager.setApp(this.app);
+		if (this.manifest.dir) {
+			this.dictionaryManager.setPluginDir(this.manifest.dir);
 		}
 		await this.dictionaryManager.init();
 		this.dictionaryPopup = new DictionaryPopup(
@@ -477,7 +477,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		return centerRect();
 	}
 
-	/** 获取插件目录的绝对路径（vault 根 + manifest.dir） */
+	/** 获取插件目录的绝对路径（vault 根 + manifest.dir），仅桌面端可用 */
 	getPluginDir(): string | null {
 		const rel = this.manifest.dir;
 		if (!rel) {
@@ -487,7 +487,25 @@ export default class NihongAIExplainPlugin extends Plugin {
 		if (!(adapter instanceof FileSystemAdapter)) {
 			return null;
 		}
-		const pathMod = require("node:path");
-		return pathMod.join(adapter.getBasePath(), rel);
+		// 动态 require 避开 esbuild 静态分析，移动端 Capacitor 无 require 全局
+		try {
+			const dynamicRequire = new Function(
+				"return typeof require !== 'undefined' ? require : undefined",
+			)() as ((m: string) => unknown) | undefined;
+			if (!dynamicRequire) {
+				return null;
+			}
+			const pathMod = dynamicRequire("node:path") as {
+				join: (...args: string[]) => string;
+			};
+			return pathMod.join(adapter.getBasePath(), rel);
+		} catch {
+			return null;
+		}
+	}
+
+	/** 获取插件目录的 vault 相对路径，移动端可用（用于显示给用户复制） */
+	getPluginDirRelative(): string | null {
+		return this.manifest.dir ?? null;
 	}
 }
