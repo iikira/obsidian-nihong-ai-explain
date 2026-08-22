@@ -1,13 +1,19 @@
 import { positionCard } from "../popupUtils";
 import { getFuriganaSegments } from "./furigana";
-import type { LookupResult, ProcessedTag, StructuredContent, ContentNode } from "./types";
+import type { LookupResult, ProcessedTag, ContentNode } from "./types";
 
 const CARD_CLASS = "nihong-ai-dict-popup";
 type State = "loading" | "result" | "error" | "empty";
 
 export class DictionaryPopup {
 	private el: HTMLDivElement | null = null;
-	private scrollHandler = (): void => this.hide();
+	private scrollHandler = (e: Event): void => {
+		// 卡片内部滚动条滚动不触发 hide
+		if (e.target instanceof Element && e.target.closest(`.${CARD_CLASS}`)) {
+			return;
+		}
+		this.hide();
+	};
 	private externalClickHandler: ((e: MouseEvent) => void) | null = null;
 
 	constructor(private getTag: (name: string) => ProcessedTag | undefined) {}
@@ -27,12 +33,14 @@ export class DictionaryPopup {
 			this.renderTerms(terms);
 		}
 		this.position(rect);
+		this.attachHideListeners();
 	}
 
 	showError(message: string, rect: DOMRect): void {
 		this.ensureEl();
 		this.render("error", message);
 		this.position(rect);
+		this.attachHideListeners();
 	}
 
 	hide(): void {
@@ -209,14 +217,27 @@ export class DictionaryPopup {
 	}
 
 	private renderContentNode(container: HTMLElement, node: ContentNode): void {
+		if (node == null) {
+			return;
+		}
 		if (typeof node === "string") {
 			const span = document.createElement("span");
 			span.textContent = node;
 			container.appendChild(span);
 			return;
 		}
-		if (!Array.isArray(node) && typeof node === "object" && node !== null && "tag" in node) {
-			const content = node as StructuredContent;
+		if (Array.isArray(node)) {
+			for (const child of node) {
+				this.renderContentNode(container, child as ContentNode);
+			}
+			return;
+		}
+		if (typeof node !== "object") {
+			container.append(String(node));
+			return;
+		}
+		if ("tag" in node) {
+			const content = node;
 			const el = document.createElement(content.tag);
 			if (content.data) {
 				for (const [k, v] of Object.entries(content.data)) {
@@ -242,10 +263,92 @@ export class DictionaryPopup {
 			container.appendChild(el);
 			return;
 		}
-		if (Array.isArray(node)) {
-			for (const child of node) {
-				this.renderContentNode(container, child as ContentNode);
+		if (!("type" in node)) {
+			return;
+		}
+		const t = node;
+		switch (t.type) {
+			case "text": {
+				const span = document.createElement("span");
+				span.textContent = t.text;
+				container.appendChild(span);
+				break;
 			}
+			case "structured": {
+				this.renderContentNode(container, t.content as ContentNode);
+				break;
+			}
+			case "link": {
+				const a = document.createElement("a");
+				if (t.href) {
+					a.setAttribute("href", t.href);
+				}
+				if (t.text) {
+					a.textContent = t.text;
+				}
+				if (t.content !== undefined) {
+					this.renderContentNode(a, t.content as ContentNode);
+				}
+				container.appendChild(a);
+				break;
+			}
+			case "image": {
+				const img = document.createElement("img");
+				img.alt = t.title ?? "";
+				img.title = t.title ?? "";
+				if (t.width) {
+					img.width = t.width;
+				}
+				if (t.height) {
+					img.height = t.height;
+				}
+				img.loading = "lazy";
+				container.appendChild(img);
+				break;
+			}
+			case "audio":
+				break;
+			case "quote": {
+				const q = document.createElement("blockquote");
+				q.className = "nihong-ai-dict-quote";
+				if (t.content !== undefined) {
+					this.renderContentNode(q, t.content as ContentNode);
+				}
+				container.appendChild(q);
+				break;
+			}
+			case "footnote": {
+				const fn = document.createElement("aside");
+				fn.className = "nihong-ai-dict-footnote";
+				if (t.reference) {
+					const ref = document.createElement("span");
+					ref.className = "nihong-ai-dict-footnote-ref";
+					ref.textContent = t.reference;
+					fn.appendChild(ref);
+				}
+				if (t.content !== undefined) {
+					this.renderContentNode(fn, t.content as ContentNode);
+				}
+				container.appendChild(fn);
+				break;
+			}
+			case "deinflection": {
+				if (t.variant) {
+					const span = document.createElement("span");
+					span.className = "nihong-ai-dict-deinflection";
+					span.textContent = t.variant;
+					container.appendChild(span);
+				}
+				break;
+			}
+			case "example": {
+				if (t.content !== undefined) {
+					this.renderContentNode(container, t.content as ContentNode);
+				}
+				break;
+			}
+			default:
+				break;
 		}
 	}
 

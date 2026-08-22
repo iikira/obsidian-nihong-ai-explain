@@ -52,15 +52,18 @@ export interface ProcessedTag {
 	dictionary: string;
 }
 
-/** Yomitan 结构化内容（glossary 的一种形式） */
-export interface StructuredContent {
-	tag: string;
-	content?: ContentNode;
-	data?: Record<string, string>;
-	href?: string;
-	lang?: string;
-	title?: string;
-}
+/** Yomitan 结构化内容（新版 type-based 格式，仍兼容旧版 tag-based） */
+export type StructuredContent =
+	| { type: "text"; text: string }
+	| { type: "structured"; content: ContentNode }
+	| { type: "link"; href: string; text?: string; content?: ContentNode }
+	| { type: "image"; path: string; title?: string; width?: number; height?: number }
+	| { type: "audio"; path: string; title?: string }
+	| { type: "footnote"; content?: ContentNode; reference?: string }
+	| { type: "quote"; content?: ContentNode }
+	| { type: "deinflection"; variant?: string; reasons?: unknown[] }
+	| { type: "example"; content?: ContentNode }
+	| { tag: string; content?: ContentNode; data?: Record<string, string>; href?: string; lang?: string; title?: string };
 
 export type ContentNode =
 	| string
