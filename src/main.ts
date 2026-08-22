@@ -170,6 +170,19 @@ export default class NihongAIExplainPlugin extends Plugin {
 		];
 	}
 
+	/**
+	 * 按模型 id 动态组装"关闭思考"字段，返回要合并进请求 body 的对象。
+	 * - hy3-free：OpenAI 风格 { reasoning_effort: "none" }
+	 * - 含 deepseek-v4：DeepSeek 风格 { thinking: { type: "disabled" } }
+	 * - 其他：默认 OpenAI 风格 { reasoning_effort: "none" }
+	 */
+	private buildDisableThinking(model: string): Record<string, unknown> {
+		if (model.includes("deepseek-v4")) {
+			return { thinking: { type: "disabled" } };
+		}
+		return { reasoning_effort: "none" };
+	}
+
 	private async callModelOnce(
 		messages: ChatMessage[],
 		temperature?: number
@@ -181,13 +194,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 		if (this.settings.apiKey) {
 			headers["Authorization"] = `Bearer ${this.settings.apiKey}`;
 		}
-		const body = {
+		const body: Record<string, unknown> = {
 			model: this.settings.modelName,
 			messages,
 			temperature: temperature ?? this.settings.temperature,
 			stream: false,
-			reasoning_effort: "none",
 		};
+		Object.assign(body, this.buildDisableThinking(this.settings.modelName));
 		const resp = await requestUrl({
 			url,
 			method: "POST",
