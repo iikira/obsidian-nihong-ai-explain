@@ -124,9 +124,10 @@ export class DictionaryManager {
 			const msg = e instanceof Error ? e.message : String(e);
 			throw new Error(`扫描插件目录失败: ${msg}`);
 		}
-		const zips = listed.files
-			.filter((name) => name.toLowerCase().endsWith(".zip"))
-			.map((name) => normalizePath(`${dir}/${name}`));
+		// adapter.list 返回的 files 已是完整 vault 相对路径（含目录前缀），直接用
+		const zips = listed.files.filter((name) =>
+			name.toLowerCase().endsWith(".zip"),
+		);
 		if (zips.length === 0) {
 			throw new Error(
 				`插件目录下未找到 zip 文件，请先将词典 zip 复制到: ${dir}`,
