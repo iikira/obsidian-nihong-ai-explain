@@ -37,6 +37,17 @@ interface ChatCompletionResponse {
 	error?: { message?: string };
 }
 
+interface PerfRecord {
+	attempt: number;
+	ok: boolean;
+	status: number;
+	ms: number;
+	model: string;
+	msgCount: number;
+	contentLen?: number;
+	error?: string;
+}
+
 const MAX_WORD_LEN = 100;
 const FORBIDDEN_NAME_CHARS = /[\\/:*?"<>|]/g;
 
@@ -266,6 +277,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		messages: ChatMessage[],
 		group: ModelGroup,
 		temperature?: number,
+		attempt = 1,
 	): Promise<string> {
 		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
 		const headers: Record<string, string> = {
@@ -281,39 +293,123 @@ export default class NihongAIExplainPlugin extends Plugin {
 			stream: false,
 		};
 		Object.assign(body, this.buildDisableThinking(group.modelId));
-		const resp = await requestUrl({
-			url,
-			method: "POST",
-			headers,
-			body: JSON.stringify(body),
-			throw: false,
-		});
-		const data = resp.json as ChatCompletionResponse;
-		if (resp.status < 200 || resp.status >= 300) {
-			const errMsg =
-				data?.error?.message ||
-				`HTTP ${resp.status}`;
-			throw new Error(`API 请求失败: ${errMsg}`);
+		const t0 = performance.now();
+		let status = 0;
+		try {
+			const resp = await requestUrl({
+				url,
+				method: "POST",
+				headers,
+				body: JSON.stringify(body),
+				throw: false,
+			});
+			status = resp.status;
+			const t1 = performance.now();
+			const ms = Math.round((t1 - t0) * 100) / 100;
+			const data = resp.json as ChatCompletionResponse;
+			if (resp.status < 200 || resp.status >= 300) {
+				const errMsg =
+					data?.error?.message ||
+					`HTTP ${resp.status}`;
+				this.logPerf({
+					attempt,
+					ok: false,
+					status,
+					ms,
+					model: group.modelId,
+					msgCount: messages.length,
+					error: `HTTP ${resp.status}`,
+				});
+				throw new Error(`API 请求失败: ${errMsg}`);
+			}
+			if (!data || !data.choices || data.choices.length === 0) {
+				this.logPerf({
+					attempt,
+					ok: false,
+					status,
+					ms,
+					model: group.modelId,
+					msgCount: messages.length,
+					error: "no choices",
+				});
+				throw new Error("响应无 choices");
+			}
+			const msg = data.choices[0].message;
+			const content = msg?.content ?? "";
+			const reasoning = msg?.reasoning_content || msg?.reasoning || "";
+			if (reasoning.trim()) {
+				console.warn(
+					`[nihong-ai-explain] reasoning_content 非空 (${reasoning.length} chars)，仍按 content 输出`
+				);
+			}
+			if (!content.trim()) {
+				this.logPerf({
+					attempt,
+					ok: false,
+					status,
+					ms,
+					model: group.modelId,
+					msgCount: messages.length,
+					error: "empty content",
+				});
+				throw new Error("响应 message.content 为空");
+			}
+			this.logPerf({
+				attempt,
+				ok: true,
+				status,
+				ms,
+				model: group.modelId,
+				msgCount: messages.length,
+				contentLen: content.length,
+			});
+			return content;
+		} catch (e) {
+			const ms = Math.round((performance.now() - t0) * 100) / 100;
+			const err = e instanceof Error ? e.message : String(e);
+			// 仅当 status 仍为 0（异常在 await 前/中抛出且未走到上面记录分支）时补记一次
+			if (status === 0) {
+				this.logPerf({
+					attempt,
+					ok: false,
+					status: 0,
+					ms,
+					model: group.modelId,
+					msgCount: messages.length,
+					error: err,
+				});
+			}
+			throw e;
 		}
-		if (!data || !data.choices || data.choices.length === 0) {
-			throw new Error("响应无 choices");
-		}
-		const msg = data.choices[0].message;
-		const content = msg?.content ?? "";
-		const reasoning = msg?.reasoning_content || msg?.reasoning || "";
-		if (reasoning.trim()) {
-			console.warn(
-				`[nihong-ai-explain] reasoning_content 非空 (${reasoning.length} chars)，仍按 content 输出`
-			);
-		}
-		if (!content.trim()) {
-			throw new Error("响应 message.content 为空");
-		}
-		return content;
 	}
 
 	private sleep(ms: number): Promise<void> {
 		return new Promise((r) => setTimeout(r, ms));
+	}
+
+	private perfRecords: PerfRecord[] = [];
+
+	private logPerf(rec: PerfRecord): void {
+		this.perfRecords.push(rec);
+	}
+
+	private flushPerfTable(): void {
+		const records = this.perfRecords;
+		this.perfRecords = [];
+		if (records.length === 0) {
+			return;
+		}
+		const okCount = records.filter((r) => r.ok).length;
+		const totalMs = records.reduce((s, r) => s + r.ms, 0);
+		const last = records[records.length - 1];
+		console.groupCollapsed(
+			`[nihong-ai-explain perf] ${records.length} 次调用 · 成功 ${okCount} · 失败 ${records.length - okCount} · 累计 ${totalMs.toFixed(0)}ms · 终态 ${last.ok ? "成功" : "失败"}`,
+		);
+		console.table(records);
+		console.log(
+			`汇总: 尝试 ${records.length} 次, 总耗时 ${totalMs.toFixed(0)}ms, 平均 ${(totalMs / records.length).toFixed(0)}ms, 模型 ${last.model}, 消息数 ${last.msgCount}`,
+		);
+		console.groupEnd();
 	}
 
 	private async callModelWithRetry(
@@ -325,7 +421,14 @@ export default class NihongAIExplainPlugin extends Plugin {
 		let lastErr: unknown = null;
 		for (let attempt = 1; attempt <= max; attempt++) {
 			try {
-				return await this.callModelOnce(messages, group, temperature);
+				const result = await this.callModelOnce(
+					messages,
+					group,
+					temperature,
+					attempt,
+				);
+				this.flushPerfTable();
+				return result;
 			} catch (e) {
 				lastErr = e;
 				const msg = e instanceof Error ? e.message : String(e);
@@ -337,6 +440,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 				}
 			}
 		}
+		this.flushPerfTable();
 		const finalMsg =
 			lastErr instanceof Error ? lastErr.message : String(lastErr);
 		throw new Error(`重试 ${max} 次后仍失败: ${finalMsg}`);
