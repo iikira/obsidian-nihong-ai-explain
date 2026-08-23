@@ -1,4 +1,11 @@
-import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
+import {
+	App,
+	DropdownComponent,
+	Notice,
+	Platform,
+	PluginSettingTab,
+	Setting,
+} from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 
 export interface ModelGroup {
@@ -191,6 +198,8 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
 	plugin: NihongAIExplainPlugin;
+	/** 当前分组下拉框引用，分组名变化时实时刷新选项 */
+	private activeDropdown: DropdownComponent | null = null;
 
 	constructor(app: App, plugin: NihongAIExplainPlugin) {
 		super(app, plugin);
@@ -222,9 +231,8 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			.setName("当前分组")
 			.setDesc("选中哪个分组，AI 讲解/翻译就用该分组的大模型。")
 			.addDropdown((dropdown) => {
-				for (const g of this.plugin.settings.modelGroups) {
-					dropdown.addOption(g.id, g.name || g.modelId || g.id);
-				}
+				this.activeDropdown = dropdown;
+				this.refreshDropdownOptions();
 				dropdown.setValue(this.plugin.settings.activeModelGroupId);
 				dropdown.onChange(async (value) => {
 					this.plugin.settings.activeModelGroupId = value;
@@ -509,10 +517,26 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					text.setPlaceholder("分组名称");
 					text.inputEl.classList.add("nihong-ai-group-name-input");
 					text.setValue(g.name);
+					// 编辑过程中只在非空时持久化，避免空值导致 UI 跳变
 					text.onChange(async (value) => {
-						g.name = value;
-						await this.plugin.saveSettings();
-						headerSetting.setName(value || `(未命名 ${g.id})`);
+						if (value.trim()) {
+							g.name = value.trim();
+							await this.plugin.saveSettings();
+							// 不调 headerSetting.setName，避免编辑中重渲染抢焦
+							this.refreshDropdownOptions();
+						}
+					});
+					// 失焦时校验非空，空则提示+恢复原值
+					text.inputEl.addEventListener("blur", async () => {
+						const cur = text.inputEl.value.trim();
+						if (!cur) {
+							new Notice("分组名称不能为空");
+							text.inputEl.value = g.name;
+							return;
+						}
+						// 最终一致：标题行 + 下拉框
+						headerSetting.setName(cur);
+						this.refreshDropdownOptions();
 					});
 				})
 				.addButton((btn) => {
@@ -594,5 +618,26 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			// 分组分隔线
 			containerEl.createEl("hr", { cls: "nihong-ai-group-divider" });
 		}
+	}
+
+	/** 重建当前分组下拉框的选项（清空后重新 add），保留当前选中值 */
+	private refreshDropdownOptions(): void {
+		const dropdown = this.activeDropdown;
+		if (!dropdown) {
+			return;
+		}
+		const cur = dropdown.getValue();
+		// 清空旧 options
+		while (dropdown.selectEl.firstChild) {
+			dropdown.selectEl.removeChild(dropdown.selectEl.firstChild);
+		}
+		for (const g of this.plugin.settings.modelGroups) {
+			dropdown.addOption(g.id, g.name || g.modelId || g.id);
+		}
+		// 恢复选中（若仍存在）
+		const exists = this.plugin.settings.modelGroups.some(
+			(g) => g.id === cur,
+		);
+		dropdown.setValue(exists ? cur : (this.plugin.settings.modelGroups[0]?.id ?? ""));
 	}
 }
