@@ -493,23 +493,26 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		);
 	}
 
-	/** 渲染大模型分组列表，每个分组一行带 4 个输入框 + 删除按钮 */
+	/** 渲染大模型分组列表，每个分组拆成多行：标题行 + 3 个独立输入行 */
 	private renderModelGroups(): void {
 		const { containerEl } = this;
 		const groups = this.plugin.settings.modelGroups;
 		for (const g of groups) {
 			const isActive = g.id === this.plugin.settings.activeModelGroupId;
 
-			const setting = new Setting(containerEl)
+			// 标题行：名称 + 激活按钮 + 删除按钮
+			const headerSetting = new Setting(containerEl)
+				.setClass("nihong-ai-group-header")
 				.setName(g.name || `(未命名 ${g.id})`)
-				.setDesc(isActive ? "✅ 当前激活" : "切换为当前使用")
+				.setDesc(isActive ? "✅ 当前激活" : "未激活")
 				.addText((text) => {
 					text.setPlaceholder("分组名称");
+					text.inputEl.classList.add("nihong-ai-group-name-input");
 					text.setValue(g.name);
 					text.onChange(async (value) => {
 						g.name = value;
 						await this.plugin.saveSettings();
-						setting.setName(value || `(未命名 ${g.id})`);
+						headerSetting.setName(value || `(未命名 ${g.id})`);
 					});
 				})
 				.addButton((btn) => {
@@ -524,55 +527,72 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							this.display();
 						});
 					}
+				})
+				.addExtraButton((btn) => {
+					btn.setIcon("trash")
+						.setTooltip("删除分组")
+						.onClick(async () => {
+							if (groups.length <= 1) {
+								new Notice("至少保留一个分组");
+								return;
+							}
+							const idx = groups.indexOf(g);
+							groups.splice(idx, 1);
+							if (this.plugin.settings.activeModelGroupId === g.id) {
+								this.plugin.settings.activeModelGroupId =
+									groups[0]?.id ?? "";
+							}
+							await this.plugin.saveSettings();
+							this.display();
+						});
 				});
 
-			// API 地址
-			setting.addText((text) => {
-				text.setPlaceholder("API 地址 https://...");
-				text.setValue(g.apiUrl);
-				text.onChange(async (value) => {
-					g.apiUrl = value.trim();
-					await this.plugin.saveSettings();
-				});
-			});
-			// 模型 id
-			setting.addText((text) => {
-				text.setPlaceholder("模型 id");
-				text.setValue(g.modelId);
-				text.onChange(async (value) => {
-					g.modelId = value.trim();
-					await this.plugin.saveSettings();
-				});
-			});
-			// API Key
-			setting.addText((text) => {
-				text.inputEl.type = "password";
-				text.setPlaceholder("API Key（可空）");
-				text.setValue(g.apiKey);
-				text.onChange(async (value) => {
-					g.apiKey = value;
-					await this.plugin.saveSettings();
-				});
-			});
-			// 删除
-			setting.addExtraButton((btn) => {
-				btn.setIcon("trash")
-					.setTooltip("删除分组")
-					.onClick(async () => {
-						if (groups.length <= 1) {
-							new Notice("至少保留一个分组");
-							return;
-						}
-						const idx = groups.indexOf(g);
-						groups.splice(idx, 1);
-						if (this.plugin.settings.activeModelGroupId === g.id) {
-							this.plugin.settings.activeModelGroupId =
-								groups[0]?.id ?? "";
-						}
+			// API 地址（独立行，占满宽度）
+			new Setting(containerEl)
+				.setName("API 地址")
+				.setClass("nihong-ai-group-field")
+				.addText((text) => {
+					text.setPlaceholder("https://api.example.com/v1");
+					text.inputEl.classList.add("nihong-ai-group-input");
+					text.setValue(g.apiUrl);
+					text.onChange(async (value) => {
+						g.apiUrl = value.trim();
 						await this.plugin.saveSettings();
-						this.display();
 					});
-			});
+				});
+
+			// 模型 id（独立行）
+			new Setting(containerEl)
+				.setName("模型 id")
+				.setClass("nihong-ai-group-field")
+				.addText((text) => {
+					text.setPlaceholder("如 gpt-4o / hy3-free / deepseek-v4");
+					text.inputEl.classList.add("nihong-ai-group-input");
+					text.setValue(g.modelId);
+					text.onChange(async (value) => {
+						g.modelId = value.trim();
+						await this.plugin.saveSettings();
+					});
+				});
+
+			// API Key（独立行）
+			new Setting(containerEl)
+				.setName("API Key")
+				.setDesc("若端点需要鉴权则填入，无需可留空。")
+				.setClass("nihong-ai-group-field")
+				.addText((text) => {
+					text.inputEl.type = "password";
+					text.setPlaceholder("留空=不发送 Authorization 头");
+					text.inputEl.classList.add("nihong-ai-group-input");
+					text.setValue(g.apiKey);
+					text.onChange(async (value) => {
+						g.apiKey = value;
+						await this.plugin.saveSettings();
+					});
+				});
+
+			// 分组分隔线
+			containerEl.createEl("hr", { cls: "nihong-ai-group-divider" });
 		}
 	}
 }

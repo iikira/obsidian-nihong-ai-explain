@@ -286,3 +286,43 @@
 	color: var(--text-muted);
 }
 
+/* ====== 大模型分组管理 ====== */
+
+/* 标题行：紧凑 padding，名称输入框收窄 */
+.nihong-ai-group-header .setting-item-name {
+	font-weight: 600;
+}
+
+.nihong-ai-group-name-input {
+	width: 180px;
+	max-width: 40%;
+}
+
+/* 字段行（API地址/模型id/APIKey）：减少上下 padding */
+.nihong-ai-group-field {
+	padding-top: 6px;
+	padding-bottom: 6px;
+}
+
+.nihong-ai-group-field .setting-item-name {
+	min-width: 80px;
+	width: 80px;
+	flex: 0 0 auto;
+}
+
+.nihong-ai-group-field .setting-item-control {
+	flex: 1 1 auto;
+}
+
+.nihong-ai-group-input {
+	width: 100%;
+	min-width: 200px;
+}
+
+/* 分组分隔线 */
+hr.nihong-ai-group-divider {
+	margin: 12px 0;
+	border: none;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
