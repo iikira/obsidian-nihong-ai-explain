@@ -8,6 +8,7 @@ import {
 } from "obsidian";
 import {
 	DEFAULT_SETTINGS,
+	type ModelGroup,
 	NihongAIExplainSettings,
 	NihongAIExplainSettingTab,
 } from "./settings";
@@ -235,24 +236,42 @@ export default class NihongAIExplainPlugin extends Plugin {
 		return { reasoning_effort: "none" };
 	}
 
+	/** 获取当前激活的大模型分组；找不到则抛错 */
+	private getActiveModelGroup(): ModelGroup {
+		const groups = this.settings.modelGroups ?? [];
+		const active = groups.find(
+			(g) => g.id === this.settings.activeModelGroupId,
+		);
+		if (!active) {
+			throw new Error("未配置激活的大模型分组，请在设置中选择");
+		}
+		if (!active.apiUrl || !active.modelId) {
+			throw new Error(
+				`分组「${active.name || active.id}」未配置 API 地址或模型 id`,
+			);
+		}
+		return active;
+	}
+
 	private async callModelOnce(
 		messages: ChatMessage[],
 		temperature?: number
 	): Promise<string> {
-		const url = `${this.settings.apiUrl.replace(/\/$/, "")}/chat/completions`;
+		const group = this.getActiveModelGroup();
+		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
 		};
-		if (this.settings.apiKey) {
-			headers["Authorization"] = `Bearer ${this.settings.apiKey}`;
+		if (group.apiKey) {
+			headers["Authorization"] = `Bearer ${group.apiKey}`;
 		}
 		const body: Record<string, unknown> = {
-			model: this.settings.modelName,
+			model: group.modelId,
 			messages,
 			temperature: temperature ?? this.settings.temperature,
 			stream: false,
 		};
-		Object.assign(body, this.buildDisableThinking(this.settings.modelName));
+		Object.assign(body, this.buildDisableThinking(group.modelId));
 		const resp = await requestUrl({
 			url,
 			method: "POST",

@@ -1,15 +1,26 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 
+export interface ModelGroup {
+	/** 分组唯一 id（uuid 或固定字符串） */
+	id: string;
+	/** 显示名称 */
+	name: string;
+	/** API 根地址，例如 https://opencode.ai/zen/v1 */
+	apiUrl: string;
+	/** 模型 id */
+	modelId: string;
+	/** API Key，可选 */
+	apiKey: string;
+}
+
 export interface NihongAIExplainSettings {
 	/** 笔记输出目录，相对 vault 根，空字符串=根目录 */
 	outputDir: string;
-	/** 大模型 API 根地址，例如 https://opencode.ai/zen/v1 */
-	apiUrl: string;
-	/** 模型名称 */
-	modelName: string;
-	/** API Key，可选（部分端点不需要） */
-	apiKey: string;
+	/** 大模型分组列表 */
+	modelGroups: ModelGroup[];
+	/** 当前激活的分组 id */
+	activeModelGroupId: string;
 	/** 系统提示词 */
 	systemPrompt: string;
 	/** 用户提示词模板，{{word}} 占位 */
@@ -159,9 +170,16 @@ const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给
 
 export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	outputDir: "",
-	apiUrl: "https://opencode.ai/zen/v1",
-	modelName: "hy3-free",
-	apiKey: "",
+	modelGroups: [
+		{
+			id: "default",
+			name: "默认",
+			apiUrl: "https://opencode.ai/zen/v1",
+			modelId: "hy3-free",
+			apiKey: "",
+		},
+	],
+	activeModelGroupId: "default",
 	systemPrompt: DEFAULT_AGENT_MD,
 	userPromptTemplate: "请讲解以下日语单词：{{word}}",
 	temperature: 0.7,
@@ -196,45 +214,44 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					})
 			);
 
+		// ====== 大模型分组管理 ======
+
+		containerEl.createEl("h3", { text: "大模型分组" });
+
 		new Setting(containerEl)
-			.setName("大模型 API 地址")
-			.setDesc("OpenAI 兼容端点根地址，例如 https://opencode.ai/zen/v1")
-			.addText((text) =>
-				text
-					.setPlaceholder("https://opencode.ai/zen/v1")
-					.setValue(this.plugin.settings.apiUrl)
-					.onChange(async (value) => {
-						this.plugin.settings.apiUrl = value.trim();
+			.setName("当前分组")
+			.setDesc("选中哪个分组，AI 讲解/翻译就用该分组的大模型。")
+			.addDropdown((dropdown) => {
+				for (const g of this.plugin.settings.modelGroups) {
+					dropdown.addOption(g.id, g.name || g.modelId || g.id);
+				}
+				dropdown.setValue(this.plugin.settings.activeModelGroupId);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.activeModelGroupId = value;
+					await this.plugin.saveSettings();
+				});
+			})
+			.addButton((btn) =>
+				btn
+					.setButtonText("新增分组")
+					.setCta()
+					.onClick(async () => {
+						const id = `g_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+						this.plugin.settings.modelGroups.push({
+							id,
+							name: `分组 ${this.plugin.settings.modelGroups.length + 1}`,
+							apiUrl: "https://opencode.ai/zen/v1",
+							modelId: "",
+							apiKey: "",
+						});
 						await this.plugin.saveSettings();
+						this.display();
 					})
 			);
 
-		new Setting(containerEl)
-			.setName("模型名称")
-			.setDesc("如 hy3-free")
-			.addText((text) =>
-				text
-					.setPlaceholder("hy3-free")
-					.setValue(this.plugin.settings.modelName)
-					.onChange(async (value) => {
-						this.plugin.settings.modelName = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+		this.renderModelGroups();
 
-		new Setting(containerEl)
-			.setName("API Key（可选）")
-			.setDesc("若端点需要鉴权则填入，无需可留空。")
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text
-					.setPlaceholder("留空=不发送 Authorization 头")
-					.setValue(this.plugin.settings.apiKey)
-					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
-						await this.plugin.saveSettings();
-					});
-			});
+		// ====== 提示词与采样 ======
 
 		new Setting(containerEl)
 			.setName("用户提示词模板")
@@ -332,21 +349,21 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					})
 			);
 
-		const cacheSetting = new Setting(containerEl)
-			.setName("翻译缓存")
-			.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 ${this.plugin.translateCache?.size() ?? 0} 条。`)
-			.addButton((btn) =>
-				btn
-					.setButtonText("清空缓存")
-					.setWarning()
-					.onClick(async () => {
-						this.plugin.translateCache?.clear();
-						new Notice("已清空翻译缓存");
-						cacheSetting.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 0 条。`);
-					})
-			);
+	const cacheSetting = new Setting(containerEl)
+		.setName("翻译缓存")
+		.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 ${this.plugin.translateCache?.size() ?? 0} 条。`)
+		.addButton((btn) =>
+			btn
+				.setButtonText("清空缓存")
+				.setWarning()
+				.onClick(async () => {
+					this.plugin.translateCache?.clear();
+					new Notice("已清空翻译缓存");
+					cacheSetting.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 0 条。`);
+				})
+		);
 
-		// ====== 词典管理 ======
+	// ====== 词典管理 ======
 
 		containerEl.createEl("h3", { text: "离线词典" });
 
@@ -470,9 +487,92 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							return;
 						}
 						await mgr.clear();
-						new Notice("已清空词典");
-						await refreshDictStatus();
-					}),
-			);
+					new Notice("已清空词典");
+					await refreshDictStatus();
+				}),
+		);
+	}
+
+	/** 渲染大模型分组列表，每个分组一行带 4 个输入框 + 删除按钮 */
+	private renderModelGroups(): void {
+		const { containerEl } = this;
+		const groups = this.plugin.settings.modelGroups;
+		for (const g of groups) {
+			const isActive = g.id === this.plugin.settings.activeModelGroupId;
+
+			const setting = new Setting(containerEl)
+				.setName(g.name || `(未命名 ${g.id})`)
+				.setDesc(isActive ? "✅ 当前激活" : "切换为当前使用")
+				.addText((text) => {
+					text.setPlaceholder("分组名称");
+					text.setValue(g.name);
+					text.onChange(async (value) => {
+						g.name = value;
+						await this.plugin.saveSettings();
+						setting.setName(value || `(未命名 ${g.id})`);
+					});
+				})
+				.addButton((btn) => {
+					btn.setButtonText(isActive ? "已激活" : "激活");
+					if (isActive) {
+						btn.setCta();
+						btn.setDisabled(true);
+					} else {
+						btn.onClick(async () => {
+							this.plugin.settings.activeModelGroupId = g.id;
+							await this.plugin.saveSettings();
+							this.display();
+						});
+					}
+				});
+
+			// API 地址
+			setting.addText((text) => {
+				text.setPlaceholder("API 地址 https://...");
+				text.setValue(g.apiUrl);
+				text.onChange(async (value) => {
+					g.apiUrl = value.trim();
+					await this.plugin.saveSettings();
+				});
+			});
+			// 模型 id
+			setting.addText((text) => {
+				text.setPlaceholder("模型 id");
+				text.setValue(g.modelId);
+				text.onChange(async (value) => {
+					g.modelId = value.trim();
+					await this.plugin.saveSettings();
+				});
+			});
+			// API Key
+			setting.addText((text) => {
+				text.inputEl.type = "password";
+				text.setPlaceholder("API Key（可空）");
+				text.setValue(g.apiKey);
+				text.onChange(async (value) => {
+					g.apiKey = value;
+					await this.plugin.saveSettings();
+				});
+			});
+			// 删除
+			setting.addExtraButton((btn) => {
+				btn.setIcon("trash")
+					.setTooltip("删除分组")
+					.onClick(async () => {
+						if (groups.length <= 1) {
+							new Notice("至少保留一个分组");
+							return;
+						}
+						const idx = groups.indexOf(g);
+						groups.splice(idx, 1);
+						if (this.plugin.settings.activeModelGroupId === g.id) {
+							this.plugin.settings.activeModelGroupId =
+								groups[0]?.id ?? "";
+						}
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+		}
 	}
 }
