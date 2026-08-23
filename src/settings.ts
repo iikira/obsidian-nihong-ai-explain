@@ -200,6 +200,8 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 	plugin: NihongAIExplainPlugin;
 	/** 当前分组下拉框引用，分组名变化时实时刷新选项 */
 	private activeDropdown: DropdownComponent | null = null;
+	/** 当前激活分组的编辑区容器（只显示一个分组），切换下拉框时重渲染 */
+	private activeGroupContainer: HTMLDivElement | null = null;
 
 	constructor(app: App, plugin: NihongAIExplainPlugin) {
 		super(app, plugin);
@@ -229,16 +231,46 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("当前分组")
-			.setDesc("选中哪个分组，AI 讲解/翻译就用该分组的大模型。")
+			.setDesc("选中哪个分组，AI 讲解/翻译就用该分组；下方编辑区显示该分组信息。")
 			.addDropdown((dropdown) => {
 				this.activeDropdown = dropdown;
 				this.refreshDropdownOptions();
 				dropdown.setValue(this.plugin.settings.activeModelGroupId);
+				// 下拉框选中即激活 + 重渲染下方编辑区
 				dropdown.onChange(async (value) => {
 					this.plugin.settings.activeModelGroupId = value;
 					await this.plugin.saveSettings();
+					this.rerenderActiveGroup();
 				});
 			})
+			.addButton((btn) =>
+				btn
+					.setButtonText("复制当前")
+					.setTooltip("基于当前分组复制一个新分组")
+					.onClick(async () => {
+						const cur = this.plugin.settings.modelGroups.find(
+							(g) => g.id === this.plugin.settings.activeModelGroupId,
+						);
+						if (!cur) {
+							new Notice("未找到当前分组");
+							return;
+						}
+						const id = `g_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+						const newName = this.uniqueGroupName(
+							`${cur.name} (副本)`,
+						);
+						this.plugin.settings.modelGroups.push({
+							id,
+							name: newName,
+							apiUrl: cur.apiUrl,
+							modelId: cur.modelId,
+							apiKey: cur.apiKey,
+						});
+						this.plugin.settings.activeModelGroupId = id;
+						await this.plugin.saveSettings();
+						this.display();
+					}),
+			)
 			.addButton((btn) =>
 				btn
 					.setButtonText("新增分组")
@@ -247,17 +279,24 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						const id = `g_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
 						this.plugin.settings.modelGroups.push({
 							id,
-							name: `分组 ${this.plugin.settings.modelGroups.length + 1}`,
+							name: this.uniqueGroupName(
+								`分组 ${this.plugin.settings.modelGroups.length + 1}`,
+							),
 							apiUrl: "https://opencode.ai/zen/v1",
 							modelId: "",
 							apiKey: "",
 						});
+						this.plugin.settings.activeModelGroupId = id;
 						await this.plugin.saveSettings();
 						this.display();
-					})
+					}),
 			);
 
-		this.renderModelGroups();
+		// 分组编辑区容器（只显示当前激活的分组），由 rerenderActiveGroup 维护
+		this.activeGroupContainer = containerEl.createDiv({
+			cls: "nihong-ai-active-group",
+		});
+		this.renderActiveGroup();
 
 		// ====== 提示词与采样 ======
 
@@ -501,123 +540,147 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		);
 	}
 
-	/** 渲染大模型分组列表，每个分组拆成多行：标题行 + 3 个独立输入行 */
-	private renderModelGroups(): void {
-		const { containerEl } = this;
-		const groups = this.plugin.settings.modelGroups;
-		for (const g of groups) {
-			const isActive = g.id === this.plugin.settings.activeModelGroupId;
+	/** 清空激活分组编辑容器并重新渲染当前激活分组 */
+	private rerenderActiveGroup(): void {
+		if (!this.activeGroupContainer) {
+			return;
+		}
+		this.activeGroupContainer.empty();
+		this.renderActiveGroup();
+	}
 
-			// 标题行：名称 + 激活按钮 + 删除按钮
-			const headerSetting = new Setting(containerEl)
-				.setClass("nihong-ai-group-header")
-				.setName(g.name || `(未命名 ${g.id})`)
-				.setDesc(isActive ? "✅ 当前激活" : "未激活")
-				.addText((text) => {
-					text.setPlaceholder("分组名称");
-					text.inputEl.classList.add("nihong-ai-group-name-input");
-					text.setValue(g.name);
-					// 编辑过程中只在非空时持久化，避免空值导致 UI 跳变
-					text.onChange(async (value) => {
-						if (value.trim()) {
-							g.name = value.trim();
-							await this.plugin.saveSettings();
-							// 不调 headerSetting.setName，避免编辑中重渲染抢焦
-							this.refreshDropdownOptions();
-						}
-					});
-					// 失焦时校验非空，空则提示+恢复原值
-					text.inputEl.addEventListener("blur", async () => {
-						const cur = text.inputEl.value.trim();
-						if (!cur) {
-							new Notice("分组名称不能为空");
-							text.inputEl.value = g.name;
+	/** 只渲染当前激活的分组（标题行 + 3 个字段行） */
+	private renderActiveGroup(): void {
+		const host = this.activeGroupContainer;
+		if (!host) {
+			return;
+		}
+		const g = this.plugin.settings.modelGroups.find(
+			(x) => x.id === this.plugin.settings.activeModelGroupId,
+		);
+		if (!g) {
+			host.createEl("div", {
+				text: "未选择分组",
+				cls: "nihong-ai-group-empty",
+			});
+			return;
+		}
+
+		// 标题行：名称 + 删除按钮
+		const headerSetting = new Setting(host)
+			.setClass("nihong-ai-group-header")
+			.setName(g.name || `(未命名 ${g.id})`)
+			.setDesc("当前激活分组")
+			.addText((text) => {
+				text.setPlaceholder("分组名称");
+				text.inputEl.classList.add("nihong-ai-group-name-input");
+				text.setValue(g.name);
+				// onChange 实时只校验非空（避免空值持久化），不校验重名（避免输入到一半撞名被拒）
+				text.onChange(async (value) => {
+					const v = value.trim();
+					if (!v) {
+						return;
+					}
+					g.name = v;
+					await this.plugin.saveSettings();
+					this.refreshDropdownOptions();
+				});
+				// blur 校验空 + 重名，最终一致性更新
+				text.inputEl.addEventListener("blur", async () => {
+					const v = text.inputEl.value.trim();
+					if (!v) {
+						new Notice("分组名称不能为空");
+						text.inputEl.value = g.name;
+						return;
+					}
+					// 检查重名（排除自身）
+					const dup = this.plugin.settings.modelGroups.find(
+						(x) => x.id !== g.id && x.name === v,
+					);
+					if (dup) {
+						new Notice(`分组名称「${v}」已存在`);
+						text.inputEl.value = g.name;
+						return;
+					}
+					g.name = v;
+					await this.plugin.saveSettings();
+					headerSetting.setName(v);
+					this.refreshDropdownOptions();
+				});
+			})
+			.addExtraButton((btn) => {
+				btn.setIcon("trash")
+					.setTooltip("删除分组")
+					.onClick(async () => {
+						if (this.plugin.settings.modelGroups.length <= 1) {
+							new Notice("至少保留一个分组");
 							return;
 						}
-						// 最终一致：标题行 + 下拉框
-						headerSetting.setName(cur);
-						this.refreshDropdownOptions();
-					});
-				})
-				.addButton((btn) => {
-					btn.setButtonText(isActive ? "已激活" : "激活");
-					if (isActive) {
-						btn.setCta();
-						btn.setDisabled(true);
-					} else {
-						btn.onClick(async () => {
-							this.plugin.settings.activeModelGroupId = g.id;
-							await this.plugin.saveSettings();
-							this.display();
-						});
-					}
-				})
-				.addExtraButton((btn) => {
-					btn.setIcon("trash")
-						.setTooltip("删除分组")
-						.onClick(async () => {
-							if (groups.length <= 1) {
-								new Notice("至少保留一个分组");
-								return;
-							}
-							const idx = groups.indexOf(g);
-							groups.splice(idx, 1);
-							if (this.plugin.settings.activeModelGroupId === g.id) {
-								this.plugin.settings.activeModelGroupId =
-									groups[0]?.id ?? "";
-							}
-							await this.plugin.saveSettings();
-							this.display();
-						});
-				});
-
-			// API 地址（独立行，占满宽度）
-			new Setting(containerEl)
-				.setName("API 地址")
-				.setClass("nihong-ai-group-field")
-				.addText((text) => {
-					text.setPlaceholder("https://api.example.com/v1");
-					text.inputEl.classList.add("nihong-ai-group-input");
-					text.setValue(g.apiUrl);
-					text.onChange(async (value) => {
-						g.apiUrl = value.trim();
+						const idx = this.plugin.settings.modelGroups.indexOf(g);
+						this.plugin.settings.modelGroups.splice(idx, 1);
+						this.plugin.settings.activeModelGroupId =
+							this.plugin.settings.modelGroups[0]?.id ?? "";
 						await this.plugin.saveSettings();
+						this.display();
 					});
-				});
+			});
 
-			// 模型 id（独立行）
-			new Setting(containerEl)
-				.setName("模型 id")
-				.setClass("nihong-ai-group-field")
-				.addText((text) => {
-					text.setPlaceholder("如 gpt-4o / hy3-free / deepseek-v4");
-					text.inputEl.classList.add("nihong-ai-group-input");
-					text.setValue(g.modelId);
-					text.onChange(async (value) => {
-						g.modelId = value.trim();
-						await this.plugin.saveSettings();
-					});
+		// API 地址
+		new Setting(host)
+			.setName("API 地址")
+			.setClass("nihong-ai-group-field")
+			.addText((text) => {
+				text.setPlaceholder("https://api.example.com/v1");
+				text.inputEl.classList.add("nihong-ai-group-input");
+				text.setValue(g.apiUrl);
+				text.onChange(async (value) => {
+					g.apiUrl = value.trim();
+					await this.plugin.saveSettings();
 				});
+			});
 
-			// API Key（独立行）
-			new Setting(containerEl)
-				.setName("API Key")
-				.setDesc("若端点需要鉴权则填入，无需可留空。")
-				.setClass("nihong-ai-group-field")
-				.addText((text) => {
-					text.inputEl.type = "password";
-					text.setPlaceholder("留空=不发送 Authorization 头");
-					text.inputEl.classList.add("nihong-ai-group-input");
-					text.setValue(g.apiKey);
-					text.onChange(async (value) => {
-						g.apiKey = value;
-						await this.plugin.saveSettings();
-					});
+		// 模型 id
+		new Setting(host)
+			.setName("模型 id")
+			.setClass("nihong-ai-group-field")
+			.addText((text) => {
+				text.setPlaceholder("如 gpt-4o / hy3-free / deepseek-v4");
+				text.inputEl.classList.add("nihong-ai-group-input");
+				text.setValue(g.modelId);
+				text.onChange(async (value) => {
+					g.modelId = value.trim();
+					await this.plugin.saveSettings();
 				});
+			});
 
-			// 分组分隔线
-			containerEl.createEl("hr", { cls: "nihong-ai-group-divider" });
+		// API Key
+		new Setting(host)
+			.setName("API Key")
+			.setDesc("若端点需要鉴权则填入，无需可留空。")
+			.setClass("nihong-ai-group-field")
+			.addText((text) => {
+				text.inputEl.type = "password";
+				text.setPlaceholder("留空=不发送 Authorization 头");
+				text.inputEl.classList.add("nihong-ai-group-input");
+				text.setValue(g.apiKey);
+				text.onChange(async (value) => {
+					g.apiKey = value;
+					await this.plugin.saveSettings();
+				});
+			});
+	}
+
+	/** 在现有分组名基础上确保不重名：若撞名则加 (2)/(3)... 后缀 */
+	private uniqueGroupName(base: string): string {
+		const groups = this.plugin.settings.modelGroups;
+		if (!groups.some((g) => g.name === base)) {
+			return base;
 		}
+		let i = 2;
+		while (groups.some((g) => g.name === `${base} (${i})`)) {
+			i++;
+		}
+		return `${base} (${i})`;
 	}
 
 	/** 重建当前分组下拉框的选项（清空后重新 add），保留当前选中值 */
@@ -638,6 +701,8 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		const exists = this.plugin.settings.modelGroups.some(
 			(g) => g.id === cur,
 		);
-		dropdown.setValue(exists ? cur : (this.plugin.settings.modelGroups[0]?.id ?? ""));
+		dropdown.setValue(
+			exists ? cur : (this.plugin.settings.modelGroups[0]?.id ?? ""),
+		);
 	}
 }

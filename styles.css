@@ -319,10 +319,16 @@
 	min-width: 200px;
 }
 
-/* 分组分隔线 */
-hr.nihong-ai-group-divider {
-	margin: 12px 0;
-	border: none;
-	border-top: 1px solid var(--background-modifier-border);
+/* 分组编辑区容器：左侧缩进强调"属于当前分组" */
+.nihong-ai-active-group {
+	margin-top: 8px;
+	padding-left: 12px;
+	border-left: 2px solid var(--background-modifier-border);
+}
+
+.nihong-ai-group-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 8px 0;
 }
 
