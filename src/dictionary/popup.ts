@@ -25,6 +25,7 @@ export class DictionaryPopup {
 	constructor(
 		private getTag: (name: string) => ProcessedTag | undefined,
 		private onNavigate?: (query: string) => void,
+		private getFontSize?: () => number,
 	) {}
 
 	showLoading(rect: DOMRect): void {
@@ -80,6 +81,10 @@ export class DictionaryPopup {
 		}
 		const div = document.createElement("div");
 		div.className = CARD_CLASS;
+		const fs = this.getFontSize?.() ?? 0;
+		if (fs > 0) {
+			div.style.setProperty("--nihong-ai-dict-fs", `${fs}px`);
+		}
 		div.style.display = "none";
 		const close = document.createElement("button");
 		close.className = "nihong-ai-dict-close";

@@ -64,6 +64,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.dictionaryPopup = new DictionaryPopup(
 			(name) => this.dictionaryManager?.getTag(name),
 			(query) => this.lookupInPopup(query),
+			() => this.settings.dictFontSize,
 		);
 		this.pill = new SelectionPill([
 			{
@@ -463,6 +464,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 			this.dictionaryPopup = new DictionaryPopup(
 				(name) => this.dictionaryManager?.getTag(name),
 				(query) => this.lookupInPopup(query),
+				() => this.settings.dictFontSize,
 			);
 		}
 

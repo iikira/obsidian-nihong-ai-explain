@@ -46,6 +46,8 @@ export interface NihongAIExplainSettings {
 	requestTimeout: number;
 	/** 翻译目标语言 */
 	targetLanguage: string;
+	/** 词典卡片字号（px），0=使用默认 */
+	dictFontSize: number;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -200,6 +202,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	retryInterval: 2000,
 	requestTimeout: 120000,
 	targetLanguage: "中文",
+	dictFontSize: 0,
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -429,6 +432,31 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.targetLanguage = value.trim() || "中文";
 						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("词典卡片字号")
+			.setDesc(
+				"词典卡片正文基础字号（px），范围为 8–32，默认 0（使用 Obsidian 主题默认值）。修改后新打开的卡片生效。",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("0")
+					.setValue(String(this.plugin.settings.dictFontSize))
+					.onChange(async (value) => {
+						const n = Number(value);
+						if (
+							Number.isFinite(n) &&
+							(n === 0 || (n >= 8 && n <= 32))
+						) {
+							this.plugin.settings.dictFontSize = n;
+							await this.plugin.saveSettings();
+							text.inputEl.style.borderColor = "";
+						} else {
+							text.inputEl.style.borderColor =
+								"var(--text-error)";
+						}
 					})
 			);
 

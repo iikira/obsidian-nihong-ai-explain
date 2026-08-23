@@ -118,7 +118,7 @@
 	border-radius: 8px;
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 	padding: 12px 14px;
-	font-size: 14px;
+	font-size: var(--nihong-ai-dict-fs, 14px);
 	line-height: 1.6;
 	-webkit-user-select: text;
 	user-select: text;
@@ -136,7 +136,7 @@
 	border: none;
 	background: transparent;
 	color: var(--text-muted);
-	font-size: 18px;
+	font-size: 1.3em;
 	line-height: 1;
 	cursor: pointer;
 	padding: 2px 6px;
@@ -175,18 +175,18 @@
 }
 
 .nihong-ai-dict-header {
-	font-size: 16px;
+	font-size: 1.15em;
 	font-weight: 600;
 	margin-bottom: 4px;
 	color: var(--text-normal);
 }
 
 .nihong-ai-dict-furigana {
-	font-size: 16px;
+	font-size: 1.15em;
 }
 
 .nihong-ai-dict-furigana rt {
-	font-size: 10px;
+	font-size: 0.7em;
 	font-weight: normal;
 	color: var(--text-muted);
 	user-select: none;
@@ -194,7 +194,7 @@
 }
 
 .nihong-ai-dict-reason {
-	font-size: 12px;
+	font-size: 0.85em;
 	font-weight: normal;
 	color: var(--text-muted);
 	margin-left: 4px;
@@ -219,7 +219,7 @@
 .nihong-ai-dict-tag {
 	display: inline-block;
 	padding: 0 4px;
-	font-size: 11px;
+	font-size: 0.79em;
 	background: var(--background-modifier-hover);
 	color: var(--text-muted);
 	border-radius: 3px;
@@ -252,7 +252,7 @@
 }
 
 .nihong-ai-dict-attribution {
-	font-size: 11px;
+	font-size: 0.79em;
 	color: var(--text-faint);
 }
 
@@ -271,7 +271,7 @@
 .nihong-ai-dict-footnote {
 	margin: 4px 0;
 	padding: 4px 8px;
-	font-size: 12px;
+	font-size: 0.85em;
 	color: var(--text-muted);
 	border-top: 1px dashed var(--background-modifier-border);
 }
