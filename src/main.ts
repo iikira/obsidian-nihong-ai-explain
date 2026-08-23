@@ -236,28 +236,36 @@ export default class NihongAIExplainPlugin extends Plugin {
 		return { reasoning_effort: "none" };
 	}
 
-	/** 获取当前激活的大模型分组；找不到则抛错 */
-	private getActiveModelGroup(): ModelGroup {
+	/** 按 id 查找大模型分组；找不到或配置不全则抛错 */
+	private getModelGroup(id: string, label: string): ModelGroup {
 		const groups = this.settings.modelGroups ?? [];
-		const active = groups.find(
-			(g) => g.id === this.settings.activeModelGroupId,
-		);
-		if (!active) {
-			throw new Error("未配置激活的大模型分组，请在设置中选择");
+		const g = groups.find((x) => x.id === id);
+		if (!g) {
+			throw new Error(`未配置${label}的大模型分组，请在设置中选择`);
 		}
-		if (!active.apiUrl || !active.modelId) {
+		if (!g.apiUrl || !g.modelId) {
 			throw new Error(
-				`分组「${active.name || active.id}」未配置 API 地址或模型 id`,
+				`${label}分组「${g.name || g.id}」未配置 API 地址或模型 id`,
 			);
 		}
-		return active;
+		return g;
+	}
+
+	/** AI 讲解用的大模型分组 */
+	private getExplainModelGroup(): ModelGroup {
+		return this.getModelGroup(this.settings.explainModelGroupId, "AI 讲解");
+	}
+
+	/** 翻译用的大模型分组 */
+	private getTranslateModelGroup(): ModelGroup {
+		return this.getModelGroup(this.settings.translateModelGroupId, "翻译");
 	}
 
 	private async callModelOnce(
 		messages: ChatMessage[],
-		temperature?: number
+		group: ModelGroup,
+		temperature?: number,
 	): Promise<string> {
-		const group = this.getActiveModelGroup();
 		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
@@ -309,13 +317,14 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	private async callModelWithRetry(
 		messages: ChatMessage[],
-		temperature?: number
+		group: ModelGroup,
+		temperature?: number,
 	): Promise<string> {
 		const max = Math.max(0, this.settings.maxRetries);
 		let lastErr: unknown = null;
 		for (let attempt = 1; attempt <= max; attempt++) {
 			try {
-				return await this.callModelOnce(messages, temperature);
+				return await this.callModelOnce(messages, group, temperature);
 			} catch (e) {
 				lastErr = e;
 				const msg = e instanceof Error ? e.message : String(e);
@@ -353,7 +362,10 @@ export default class NihongAIExplainPlugin extends Plugin {
 		const messages = this.buildMessages(clean);
 		let content: string;
 		try {
-			content = await this.callModelWithRetry(messages);
+			content = await this.callModelWithRetry(
+				messages,
+				this.getExplainModelGroup(),
+			);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
 			new Notice(`生成失败: ${msg}`, 8000);
@@ -416,7 +428,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 		];
 
 		try {
-			const result = await this.callModelWithRetry(messages, 0.3);
+			const result = await this.callModelWithRetry(
+				messages,
+				this.getTranslateModelGroup(),
+				0.3,
+			);
 			this.translateCache.set(cacheKey, result);
 			const rectNow = this.getSelectionRect() ?? rect;
 			this.translateCard.showResult(result, rectNow);

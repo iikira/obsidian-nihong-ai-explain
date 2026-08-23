@@ -26,8 +26,12 @@ export interface NihongAIExplainSettings {
 	outputDir: string;
 	/** 大模型分组列表 */
 	modelGroups: ModelGroup[];
-	/** 当前激活的分组 id */
+	/** 当前在设置页编辑的分组 id */
 	activeModelGroupId: string;
+	/** AI 讲解用的大模型分组 id */
+	explainModelGroupId: string;
+	/** 翻译用的大模型分组 id */
+	translateModelGroupId: string;
 	/** 系统提示词 */
 	systemPrompt: string;
 	/** 用户提示词模板，{{word}} 占位 */
@@ -187,6 +191,8 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 		},
 	],
 	activeModelGroupId: "default",
+	explainModelGroupId: "default",
+	translateModelGroupId: "default",
 	systemPrompt: DEFAULT_AGENT_MD,
 	userPromptTemplate: "请讲解以下日语单词：{{word}}",
 	temperature: 0.7,
@@ -231,7 +237,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("当前分组")
-			.setDesc("选中哪个分组，AI 讲解/翻译就用该分组；下方编辑区显示该分组信息。")
+			.setDesc("选择当前正在编辑的分组（下方编辑区显示该分组信息）。")
 			.addDropdown((dropdown) => {
 				this.activeDropdown = dropdown;
 				this.refreshDropdownOptions();
@@ -291,6 +297,36 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						this.display();
 					}),
 			);
+
+		// AI 讲解大模型
+		new Setting(containerEl)
+			.setName("AI 讲解大模型")
+			.setDesc("AI 讲解功能使用此分组的大模型。")
+			.addDropdown((dropdown) => {
+				for (const g of this.plugin.settings.modelGroups) {
+					dropdown.addOption(g.id, g.name || g.modelId || g.id);
+				}
+				dropdown.setValue(this.plugin.settings.explainModelGroupId);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.explainModelGroupId = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// 翻译大模型
+		new Setting(containerEl)
+			.setName("翻译大模型")
+			.setDesc("翻译功能使用此分组的大模型。")
+			.addDropdown((dropdown) => {
+				for (const g of this.plugin.settings.modelGroups) {
+					dropdown.addOption(g.id, g.name || g.modelId || g.id);
+				}
+				dropdown.setValue(this.plugin.settings.translateModelGroupId);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.translateModelGroupId = value;
+					await this.plugin.saveSettings();
+				});
+			});
 
 		// 分组编辑区容器（只显示当前激活的分组），由 rerenderActiveGroup 维护
 		this.activeGroupContainer = containerEl.createDiv({
@@ -604,8 +640,8 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					}
 					g.name = v;
 					await this.plugin.saveSettings();
-					headerSetting.setName(v);
-					this.refreshDropdownOptions();
+					// 全页重渲染：标题行 + 当前分组下拉框 + AI讲解/翻译下拉框 都同步新名
+					this.display();
 				});
 			})
 			.addExtraButton((btn) => {
@@ -616,10 +652,19 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							new Notice("至少保留一个分组");
 							return;
 						}
-						const idx = this.plugin.settings.modelGroups.indexOf(g);
-						this.plugin.settings.modelGroups.splice(idx, 1);
-						this.plugin.settings.activeModelGroupId =
-							this.plugin.settings.modelGroups[0]?.id ?? "";
+						const s = this.plugin.settings;
+						const fallback = s.modelGroups[0]?.id ?? "";
+						const idx = s.modelGroups.indexOf(g);
+						s.modelGroups.splice(idx, 1);
+						if (s.activeModelGroupId === g.id) {
+							s.activeModelGroupId = fallback;
+						}
+						if (s.explainModelGroupId === g.id) {
+							s.explainModelGroupId = fallback;
+						}
+						if (s.translateModelGroupId === g.id) {
+							s.translateModelGroupId = fallback;
+						}
 						await this.plugin.saveSettings();
 						this.display();
 					});
