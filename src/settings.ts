@@ -298,6 +298,12 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		// 分组编辑区容器（只显示当前激活的分组），由 rerenderActiveGroup 维护
+		this.activeGroupContainer = containerEl.createDiv({
+			cls: "nihong-ai-active-group",
+		});
+		this.renderActiveGroup();
+
 		// AI 讲解大模型
 		new Setting(containerEl)
 			.setName("AI 讲解大模型")
@@ -327,12 +333,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
-
-		// 分组编辑区容器（只显示当前激活的分组），由 rerenderActiveGroup 维护
-		this.activeGroupContainer = containerEl.createDiv({
-			cls: "nihong-ai-active-group",
-		});
-		this.renderActiveGroup();
 
 		// ====== 提示词与采样 ======
 
