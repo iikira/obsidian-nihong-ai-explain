@@ -1,4 +1,4 @@
-import { Notice } from "obsidian";
+import { Notice, requestUrl } from "obsidian";
 
 const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
@@ -9,6 +9,7 @@ const SPLIT_PATTERNS = [
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentToken = 0;
+let lastBlobUrl: string | null = null;
 
 function splitForTTS(text: string): string[] {
 	const trimmed = text.trim();
@@ -46,6 +47,17 @@ function buildTTSURL(text: string): string {
 	return `https://translate.google.com/translate_tts?ie=UTF-8&q=${q}&tl=ja&client=tw-ob`;
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetchTTSBlob(text: string): Promise<string> {
+	const url = buildTTSURL(text);
+	const resp = await requestUrl({ url, method: "GET" });
+	const blob = new Blob([resp.arrayBuffer], { type: "audio/mpeg" });
+	return URL.createObjectURL(blob);
+}
+
 export function isTTSAvailable(): boolean {
 	return true;
 }
@@ -58,15 +70,16 @@ export function stopSpeak(): void {
 		} catch {
 			// noop
 		}
-		currentAudio.src = "";
-		currentAudio.removeAttribute("src");
-		currentAudio.load?.();
 		currentAudio.remove();
 		currentAudio = null;
 	}
+	if (lastBlobUrl) {
+		URL.revokeObjectURL(lastBlobUrl);
+		lastBlobUrl = null;
+	}
 }
 
-export function speakText(text: string): void {
+export async function speakText(text: string): Promise<void> {
 	const clean = text.trim();
 	if (!clean) {
 		new Notice("选区为空");
@@ -78,44 +91,43 @@ export function speakText(text: string): void {
 	let started = false;
 	let failed = false;
 
-	const playChunk = (idx: number): void => {
-		if (token !== currentToken || idx >= chunks.length || failed) {
+	for (let idx = 0; idx < chunks.length; idx++) {
+		if (token !== currentToken || failed) {
 			return;
 		}
-		const url = buildTTSURL(chunks[idx]);
-		const audio = document.createElement("audio");
-		audio.style.display = "none";
-		audio.preload = "auto";
-		audio.crossOrigin = "anonymous";
-		audio.src = url;
-		currentAudio = audio;
+		if (idx > 0) {
+			await sleep(200);
+		}
+		if (token !== currentToken || failed) {
+			return;
+		}
 
-		audio.addEventListener("ended", () => {
+		let blobUrl: string;
+		try {
+			blobUrl = await fetchTTSBlob(chunks[idx]);
+		} catch {
 			if (token !== currentToken || failed) {
 				return;
 			}
-			audio.remove();
-			if (currentAudio === audio) {
-				currentAudio = null;
-			}
-			playChunk(idx + 1);
-		});
-		audio.addEventListener("error", () => {
-			if (token !== currentToken) {
-				return;
-			}
-			if (failed) {
-				return;
-			}
 			failed = true;
-			audio.remove();
-			if (currentAudio === audio) {
-				currentAudio = null;
-			}
 			new Notice(
 				`朗读失败：无法获取 TTS 音频（第 ${idx + 1}/${chunks.length} 段）。请检查网络连接。`,
 			);
-		});
+			return;
+		}
+		if (token !== currentToken || failed) {
+			URL.revokeObjectURL(blobUrl);
+			return;
+		}
+
+		if (lastBlobUrl) {
+			URL.revokeObjectURL(lastBlobUrl);
+		}
+		lastBlobUrl = blobUrl;
+
+		const audio = new Audio(blobUrl);
+		audio.style.display = "none";
+		currentAudio = audio;
 
 		if (!started) {
 			started = true;
@@ -123,23 +135,48 @@ export function speakText(text: string): void {
 				`朗读：${clean.length > 30 ? clean.slice(0, 30) + "…" : clean}`,
 			);
 		}
-
 		document.body.appendChild(audio);
-		const playPromise = audio.play();
-		if (playPromise && typeof playPromise.catch === "function") {
-			playPromise.catch(() => {
-				if (token !== currentToken || failed) {
-					return;
-				}
-				failed = true;
+
+		try {
+			await audio.play();
+		} catch {
+			if (token !== currentToken || failed) {
+				return;
+			}
+			failed = true;
+			audio.remove();
+			if (currentAudio === audio) {
+				currentAudio = null;
+			}
+			new Notice("朗读失败：浏览器拒绝自动播放");
+			return;
+		}
+
+		await new Promise<void>((resolve) => {
+			const cleanup = (): void => {
+				audio.removeEventListener("ended", onEnd);
+				audio.removeEventListener("error", onError);
 				audio.remove();
 				if (currentAudio === audio) {
 					currentAudio = null;
 				}
-				new Notice("朗读失败：浏览器拒绝自动播放音频");
-			});
-		}
-	};
-
-	playChunk(0);
+			};
+			const onEnd = (): void => {
+				cleanup();
+				resolve();
+			};
+			const onError = (): void => {
+				cleanup();
+				if (token === currentToken && !failed) {
+					failed = true;
+					new Notice(
+						`朗读失败：音频解码错误（第 ${idx + 1}/${chunks.length} 段）`,
+					);
+				}
+				resolve();
+			};
+			audio.addEventListener("ended", onEnd);
+			audio.addEventListener("error", onError);
+		});
+	}
 }

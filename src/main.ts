@@ -102,18 +102,16 @@ export default class NihongAIExplainPlugin extends Plugin {
 				menu.addItem((item) => {
 					item
 						.setTitle("查词典")
-						.setIcon("book-open")
-						.onClick(() => void this.lookup(sel));
-				});
-				if (this.isTTSReady()) {
-					menu.addItem((item) => {
-						item
-							.setTitle("朗读")
-							.setIcon("volume-high")
-							.onClick(() => this.speakText(sel));
-					});
-				}
-			})
+					.setIcon("book-open")
+					.onClick(() => void this.lookup(sel));
+			});
+			menu.addItem((item) => {
+				item
+					.setTitle("朗读")
+					.setIcon("volume-2")
+					.onClick(() => void this.speakText(sel));
+			});
+		})
 		);
 
 		this.addCommand({
@@ -264,14 +262,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 		return this.getModelGroup(this.settings.translateModelGroupId, "翻译");
 	}
 
-	/** TTS 是否就绪：设置开关即可（Google Translate TTS 不依赖平台） */
-	isTTSReady(): boolean {
-		return this.settings.ttsEnabled;
-	}
-
 	/** 朗读选区文本 */
 	speakText(text: string): void {
-		speakText(text);
+		void speakText(text);
 	}
 
 	/** 停止朗读 */
@@ -279,9 +272,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 		stopSpeak();
 	}
 
-	/** 构造 pill actions（按 TTS 开关条件加入「朗读」按钮） */
+	/** 构造 pill actions（默认包含「朗读」按钮） */
 	private buildPillActions(): PillAction[] {
-		const actions: PillAction[] = [
+		return [
 			{
 				id: "explain",
 				label: "AI 讲解",
@@ -300,23 +293,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 				icon: "book-open",
 				handler: (text) => this.lookup(text),
 			},
-		];
-		if (this.isTTSReady()) {
-			actions.push({
+			{
 				id: "tts",
 				label: "朗读",
-				icon: "volume-high",
-				handler: (text) => this.speakText(text),
-			});
-		}
-		return actions;
-	}
-
-	/** 设置页切换 TTS 开关时调用，重建当前 pill 按钮 */
-	rebuildPillActions(): void {
-		if (this.pill) {
-			this.pill.setActions(this.buildPillActions());
-		}
+				icon: "volume-2",
+			handler: (text) => this.speakText(text),
+		},
+		];
 	}
 
 	private async callModelOnce(
