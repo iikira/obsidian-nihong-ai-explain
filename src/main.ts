@@ -1,5 +1,6 @@
 import {
 	Notice,
+	Platform,
 	Plugin,
 	TFile,
 	FileSystemAdapter,
@@ -12,12 +13,13 @@ import {
 	NihongAIExplainSettings,
 	NihongAIExplainSettingTab,
 } from "./settings";
-import { SelectionPill } from "./pill";
+import { SelectionPill, type PillAction } from "./pill";
 import { TranslateCard } from "./translateCard";
 import { LRUTranslateCache } from "./translateCache";
 import { DictionaryManager } from "./dictionary/manager";
 import { DictionaryPopup } from "./dictionary/popup";
 import { centerRect } from "./popupUtils";
+import { isTTSAvailable, speakText, stopSpeak } from "./tts";
 
 interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -77,26 +79,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 			(query) => this.lookupInPopup(query),
 			() => this.settings.dictFontSize,
 		);
-		this.pill = new SelectionPill([
-			{
-				id: "explain",
-				label: "AI 讲解",
-				icon: "sparkles",
-				handler: (text) => this.explain(text),
-			},
-			{
-				id: "translate",
-				label: "翻译",
-				icon: "languages",
-				handler: (text) => this.translate(text),
-			},
-			{
-				id: "lookup",
-				label: "查词典",
-				icon: "book-open",
-				handler: (text) => this.lookup(text),
-			},
-		]);
+		this.pill = new SelectionPill(this.buildPillActions());
 		this.pill.attach();
 
 		this.registerEvent(
@@ -123,6 +106,14 @@ export default class NihongAIExplainPlugin extends Plugin {
 						.setIcon("book-open")
 						.onClick(() => void this.lookup(sel));
 				});
+				if (this.isTTSReady()) {
+					menu.addItem((item) => {
+						item
+							.setTitle("朗读")
+							.setIcon("volume-high")
+							.onClick(() => this.speakText(sel));
+					});
+				}
 			})
 		);
 
@@ -176,6 +167,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateCache?.flush();
 		this.translateCache = null;
 		this.dictionaryManager = null;
+		stopSpeak();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -271,6 +263,65 @@ export default class NihongAIExplainPlugin extends Plugin {
 	/** 翻译用的大模型分组 */
 	private getTranslateModelGroup(): ModelGroup {
 		return this.getModelGroup(this.settings.translateModelGroupId, "翻译");
+	}
+
+	/** TTS 是否就绪：移动端 + 设置开关 + 浏览器支持 */
+	isTTSReady(): boolean {
+		return (
+			Platform.isMobileApp &&
+			this.settings.ttsEnabled &&
+			isTTSAvailable()
+		);
+	}
+
+	/** 朗读选区文本 */
+	speakText(text: string): void {
+		speakText(text);
+	}
+
+	/** 停止朗读 */
+	stopSpeak(): void {
+		stopSpeak();
+	}
+
+	/** 构造 pill actions（按 TTS 开关条件加入「朗读」按钮） */
+	private buildPillActions(): PillAction[] {
+		const actions: PillAction[] = [
+			{
+				id: "explain",
+				label: "AI 讲解",
+				icon: "sparkles",
+				handler: (text) => this.explain(text),
+			},
+			{
+				id: "translate",
+				label: "翻译",
+				icon: "languages",
+				handler: (text) => this.translate(text),
+			},
+			{
+				id: "lookup",
+				label: "查词典",
+				icon: "book-open",
+				handler: (text) => this.lookup(text),
+			},
+		];
+		if (this.isTTSReady()) {
+			actions.push({
+				id: "tts",
+				label: "朗读",
+				icon: "volume-high",
+				handler: (text) => this.speakText(text),
+			});
+		}
+		return actions;
+	}
+
+	/** 设置页切换 TTS 开关时调用，重建当前 pill 按钮 */
+	rebuildPillActions(): void {
+		if (this.pill) {
+			this.pill.setActions(this.buildPillActions());
+		}
 	}
 
 	private async callModelOnce(

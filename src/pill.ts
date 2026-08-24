@@ -92,6 +92,30 @@ export class SelectionPill {
 		this.observer.observe(document.body, { childList: true, subtree: false });
 	}
 
+	/** 动态替换 actions，下次 pill 显示时生效；当前已显示的 pill 会立即重建按钮组 */
+	setActions(actions: PillAction[]): void {
+		this.actions = actions;
+		this.refreshVisiblePill();
+	}
+
+	private refreshVisiblePill(): void {
+		const lexisPill = document.querySelector(LEXIS_PILL_SELECTOR);
+		if (lexisPill instanceof HTMLElement) {
+			this.clearInjectedButtons(lexisPill);
+			this.injectInto(lexisPill);
+			return;
+		}
+		if (this.fallbackEl) {
+			this.hideFallback();
+			this.showFallback();
+		}
+	}
+
+	private clearInjectedButtons(host: HTMLElement): void {
+		const btns = host.querySelectorAll(`[${ACTION_ATTR}]`);
+		btns.forEach((b) => b.remove());
+	}
+
 	detach(): void {
 		document.removeEventListener("mouseup", this.boundMouseUp);
 		document.removeEventListener("selectionchange", this.boundSelectionChange);

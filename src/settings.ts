@@ -48,6 +48,8 @@ export interface NihongAIExplainSettings {
 	targetLanguage: string;
 	/** 词典卡片字号（px），0=使用默认 */
 	dictFontSize: number;
+	/** 移动端 TTS 朗读开关 */
+	ttsEnabled: boolean;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -203,6 +205,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	requestTimeout: 120000,
 	targetLanguage: "中文",
 	dictFontSize: 0,
+	ttsEnabled: true,
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -453,12 +456,29 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							this.plugin.settings.dictFontSize = n;
 							await this.plugin.saveSettings();
 							text.inputEl.style.borderColor = "";
-						} else {
-							text.inputEl.style.borderColor =
-								"var(--text-error)";
-						}
-					})
-			);
+					} else {
+						text.inputEl.style.borderColor =
+							"var(--text-error)";
+					}
+				})
+		);
+
+		if (Platform.isMobileApp) {
+			new Setting(containerEl)
+				.setName("移动端 TTS 朗读")
+				.setDesc(
+					"在选区浮动按钮上增加「朗读」按钮，调用系统 TTS 引擎朗读选中文字（需系统已安装日语语音包）。修改后下次选区生效。",
+				)
+				.addToggle((toggle) =>
+					toggle
+						.setValue(this.plugin.settings.ttsEnabled)
+						.onChange(async (value) => {
+							this.plugin.settings.ttsEnabled = value;
+							await this.plugin.saveSettings();
+							this.plugin.rebuildPillActions();
+						})
+				);
+		}
 
 	const cacheSetting = new Setting(containerEl)
 		.setName("翻译缓存")
