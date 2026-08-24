@@ -11,7 +11,6 @@ const TTS_CACHE_SIZE = 128;
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentToken = 0;
-let lastBlobUrl: string | null = null;
 let currentRate = 1.0;
 const ttsCache = new Map<string, string>();
 
@@ -126,10 +125,6 @@ export function stopSpeak(): void {
 		currentAudio.remove();
 		currentAudio = null;
 	}
-	if (lastBlobUrl) {
-		URL.revokeObjectURL(lastBlobUrl);
-		lastBlobUrl = null;
-	}
 }
 
 export async function speakText(text: string): Promise<void> {
@@ -171,8 +166,6 @@ export async function speakText(text: string): Promise<void> {
 		if (token !== currentToken || failed) {
 			return;
 		}
-
-		lastBlobUrl = blobUrl;
 
 		const audio = new Audio(blobUrl);
 		audio.style.display = "none";
