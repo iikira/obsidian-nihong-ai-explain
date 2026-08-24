@@ -1,23 +1,26 @@
 import { Notice } from "obsidian";
 
-const MAX_UTTERANCE_CHARS = 1800;
+const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
-	/([。！？!?])/,
-	/([，,；;])/,
-	/([、\s])/,
+	/([。！？!?\.…])/,
+	/([，,；;、])/,
+	/([\s])/,
 ];
+
+let currentAudio: HTMLAudioElement | null = null;
+let currentToken = 0;
 
 function splitForTTS(text: string): string[] {
 	const trimmed = text.trim();
-	if (trimmed.length <= MAX_UTTERANCE_CHARS) {
-		return trimmed ? [trimmed] : [];
+	if (!trimmed) {
+		return [];
 	}
 	const out: string[] = [];
 	let rest = trimmed;
-	while (rest.length > MAX_UTTERANCE_CHARS) {
+	while (rest.length > MAX_SEGMENT_CHARS) {
 		let cut = -1;
+		const slice = rest.slice(0, MAX_SEGMENT_CHARS);
 		for (const pat of SPLIT_PATTERNS) {
-			const slice = rest.slice(0, MAX_UTTERANCE_CHARS);
 			const m = slice.match(new RegExp(pat.source + ".*$"));
 			if (m && m.index !== undefined) {
 				const pos = m.index + m[0].length;
@@ -27,13 +30,10 @@ function splitForTTS(text: string): string[] {
 			}
 		}
 		if (cut <= 0) {
-			out.push(rest.slice(0, MAX_UTTERANCE_CHARS));
-			rest = rest.slice(MAX_UTTERANCE_CHARS);
-		} else {
-			out.push(rest.slice(0, cut));
-			rest = rest.slice(cut);
+			cut = MAX_SEGMENT_CHARS;
 		}
-		rest = rest.trimStart();
+		out.push(rest.slice(0, cut));
+		rest = rest.slice(cut).trimStart();
 	}
 	if (rest) {
 		out.push(rest);
@@ -41,33 +41,32 @@ function splitForTTS(text: string): string[] {
 	return out;
 }
 
-let currentToken = 0;
+function buildTTSURL(text: string): string {
+	const q = encodeURIComponent(text);
+	return `https://translate.google.com/translate_tts?ie=UTF-8&q=${q}&tl=ja&client=tw-ob`;
+}
 
 export function isTTSAvailable(): boolean {
-	return (
-		typeof window !== "undefined" &&
-		typeof window.speechSynthesis !== "undefined" &&
-		typeof window.SpeechSynthesisUtterance !== "undefined"
-	);
+	return true;
 }
 
 export function stopSpeak(): void {
-	if (!isTTSAvailable()) {
-		return;
-	}
 	currentToken++;
-	try {
-		window.speechSynthesis.cancel();
-	} catch {
-		// noop
+	if (currentAudio) {
+		try {
+			currentAudio.pause();
+		} catch {
+			// noop
+		}
+		currentAudio.src = "";
+		currentAudio.removeAttribute("src");
+		currentAudio.load?.();
+		currentAudio.remove();
+		currentAudio = null;
 	}
 }
 
 export function speakText(text: string): void {
-	if (!isTTSAvailable()) {
-		new Notice("当前环境不支持语音合成");
-		return;
-	}
 	const clean = text.trim();
 	if (!clean) {
 		new Notice("选区为空");
@@ -79,44 +78,68 @@ export function speakText(text: string): void {
 	let started = false;
 	let failed = false;
 
-	const speakChunk = (idx: number): void => {
-		if (token !== currentToken || idx >= chunks.length) {
+	const playChunk = (idx: number): void => {
+		if (token !== currentToken || idx >= chunks.length || failed) {
 			return;
 		}
-		const utter = new SpeechSynthesisUtterance(chunks[idx]);
-		utter.lang = "ja-JP";
-		utter.rate = 1;
-		utter.pitch = 1;
-		utter.volume = 1;
-		utter.onend = () => {
+		const url = buildTTSURL(chunks[idx]);
+		const audio = document.createElement("audio");
+		audio.style.display = "none";
+		audio.preload = "auto";
+		audio.crossOrigin = "anonymous";
+		audio.src = url;
+		currentAudio = audio;
+
+		audio.addEventListener("ended", () => {
 			if (token !== currentToken || failed) {
 				return;
 			}
-			speakChunk(idx + 1);
-		};
-		utter.onerror = (ev: SpeechSynthesisErrorEvent) => {
+			audio.remove();
+			if (currentAudio === audio) {
+				currentAudio = null;
+			}
+			playChunk(idx + 1);
+		});
+		audio.addEventListener("error", () => {
 			if (token !== currentToken) {
 				return;
 			}
-			const err = ev?.error || "";
-			if (err === "interrupted" || err === "canceled") {
+			if (failed) {
 				return;
 			}
 			failed = true;
-			new Notice(`朗读失败：${err || "未知错误"}。请检查系统 TTS 引擎及日语语音包。`);
-		};
+			audio.remove();
+			if (currentAudio === audio) {
+				currentAudio = null;
+			}
+			new Notice(
+				`朗读失败：无法获取 TTS 音频（第 ${idx + 1}/${chunks.length} 段）。请检查网络连接。`,
+			);
+		});
+
 		if (!started) {
 			started = true;
-			new Notice(`朗读：${clean.length > 30 ? clean.slice(0, 30) + "…" : clean}`);
+			new Notice(
+				`朗读：${clean.length > 30 ? clean.slice(0, 30) + "…" : clean}`,
+			);
 		}
-		try {
-			window.speechSynthesis.speak(utter);
-		} catch {
-			if (token === currentToken && !failed) {
+
+		document.body.appendChild(audio);
+		const playPromise = audio.play();
+		if (playPromise && typeof playPromise.catch === "function") {
+			playPromise.catch(() => {
+				if (token !== currentToken || failed) {
+					return;
+				}
 				failed = true;
-				new Notice("朗读调用异常");
-			}
+				audio.remove();
+				if (currentAudio === audio) {
+					currentAudio = null;
+				}
+				new Notice("朗读失败：浏览器拒绝自动播放音频");
+			});
 		}
 	};
-	speakChunk(0);
+
+	playChunk(0);
 }

@@ -463,22 +463,20 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				})
 		);
 
-		if (Platform.isMobileApp) {
-			new Setting(containerEl)
-				.setName("移动端 TTS 朗读")
-				.setDesc(
-					"在选区浮动按钮上增加「朗读」按钮，调用系统 TTS 引擎朗读选中文字（需系统已安装日语语音包）。修改后下次选区生效。",
-				)
-				.addToggle((toggle) =>
-					toggle
-						.setValue(this.plugin.settings.ttsEnabled)
-						.onChange(async (value) => {
-							this.plugin.settings.ttsEnabled = value;
-							await this.plugin.saveSettings();
-							this.plugin.rebuildPillActions();
-						})
-				);
-		}
+		new Setting(containerEl)
+			.setName("TTS 朗读")
+			.setDesc(
+				"在选区浮动按钮上增加「朗读」按钮，调用 Google Translate TTS 朗读选中文字（需联网）。修改后下次选区生效。",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.ttsEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.ttsEnabled = value;
+						await this.plugin.saveSettings();
+						this.plugin.rebuildPillActions();
+					})
+			);
 
 	const cacheSetting = new Setting(containerEl)
 		.setName("翻译缓存")

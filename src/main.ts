@@ -1,6 +1,5 @@
 import {
 	Notice,
-	Platform,
 	Plugin,
 	TFile,
 	FileSystemAdapter,
@@ -19,7 +18,7 @@ import { LRUTranslateCache } from "./translateCache";
 import { DictionaryManager } from "./dictionary/manager";
 import { DictionaryPopup } from "./dictionary/popup";
 import { centerRect } from "./popupUtils";
-import { isTTSAvailable, speakText, stopSpeak } from "./tts";
+import { speakText, stopSpeak } from "./tts";
 
 interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -265,13 +264,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 		return this.getModelGroup(this.settings.translateModelGroupId, "翻译");
 	}
 
-	/** TTS 是否就绪：移动端 + 设置开关 + 浏览器支持 */
+	/** TTS 是否就绪：设置开关即可（Google Translate TTS 不依赖平台） */
 	isTTSReady(): boolean {
-		return (
-			Platform.isMobileApp &&
-			this.settings.ttsEnabled &&
-			isTTSAvailable()
-		);
+		return this.settings.ttsEnabled;
 	}
 
 	/** 朗读选区文本 */
