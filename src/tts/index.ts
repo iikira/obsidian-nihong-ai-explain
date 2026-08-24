@@ -100,11 +100,30 @@ export function getTTSCacheSize(): number {
 async function fetchTTSBlob(text: string): Promise<string> {
 	const cached = getCache(text);
 	if (cached !== null) {
+		console.log(
+			"[nihong-ai-explain tts] 缓存命中",
+			text.slice(0, 30),
+		);
 		return cached;
 	}
 	const url = buildTTSURL(text);
+	console.log("[nihong-ai-explain tts] 请求 URL", url);
 	const resp = await requestUrl({ url, method: "GET" });
-	const blob = new Blob([resp.arrayBuffer], { type: "audio/mpeg" });
+	console.log(
+		"[nihong-ai-explain tts] 响应 status=",
+		resp.status,
+		"arrayBuffer type=",
+		typeof resp.arrayBuffer,
+		"byteLength=",
+		resp.arrayBuffer?.byteLength,
+		"headers=",
+		resp.headers,
+	);
+	const buf = resp.arrayBuffer;
+	if (!buf || buf.byteLength === 0) {
+		throw new Error(`响应体为空（status=${resp.status}）`);
+	}
+	const blob = new Blob([buf], { type: "audio/mpeg" });
 	const blobUrl = URL.createObjectURL(blob);
 	setCache(text, blobUrl);
 	return blobUrl;
@@ -153,14 +172,17 @@ export async function speakText(text: string): Promise<void> {
 		let blobUrl: string;
 		try {
 			blobUrl = await fetchTTSBlob(chunks[idx]);
-		} catch {
+		} catch (err) {
+			console.error(
+				`[nihong-ai-explain tts] fetchTTSBlob 失败（第 ${idx + 1}/${chunks.length} 段）`,
+				err,
+			);
 			if (token !== currentToken || failed) {
 				return;
 			}
 			failed = true;
-			new Notice(
-				`朗读失败：无法获取 TTS 音频（第 ${idx + 1}/${chunks.length} 段）。请检查网络连接。`,
-			);
+			const errMsg = err instanceof Error ? err.message : String(err);
+			new Notice(`朗读失败：${errMsg}`);
 			return;
 		}
 		if (token !== currentToken || failed) {
@@ -182,7 +204,8 @@ export async function speakText(text: string): Promise<void> {
 
 		try {
 			await audio.play();
-		} catch {
+		} catch (err) {
+			console.error("[nihong-ai-explain tts] audio.play() 失败", err);
 			if (token !== currentToken || failed) {
 				return;
 			}
@@ -209,11 +232,15 @@ export async function speakText(text: string): Promise<void> {
 				resolve();
 			};
 			const onError = (): void => {
+				console.error(
+					"[nihong-ai-explain tts] audio error 事件",
+					audio.error,
+				);
 				cleanup();
 				if (token === currentToken && !failed) {
 					failed = true;
 					new Notice(
-						`朗读失败：音频解码错误（第 ${idx + 1}/${chunks.length} 段）`,
+						`朗读失败：音频解码错误（第 ${idx + 1}/${chunks.length} 段，code=${audio.error?.code}）`,
 					);
 				}
 				resolve();
