@@ -9,6 +9,12 @@ const SPLIT_PATTERNS = [
 
 const TTS_CACHE_SIZE = 128;
 
+const TTS_HEADERS = {
+	Referer: "https://translate.google.com/",
+	"User-Agent":
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+};
+
 let currentAudio: HTMLAudioElement | null = null;
 let currentToken = 0;
 let currentRate = 1.0;
@@ -108,10 +114,15 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	}
 	const url = buildTTSURL(text);
 	console.log("[nihong-ai-explain tts] 请求 URL", url);
-	const resp = await requestUrl({ url, method: "GET" });
+	const resp = await requestUrl({
+		url,
+		method: "GET",
+		headers: TTS_HEADERS,
+	});
 	console.log(
 		"[nihong-ai-explain tts] 响应 status=",
 		resp.status,
+		"withHeaders=true",
 		"arrayBuffer type=",
 		typeof resp.arrayBuffer,
 		"byteLength=",
