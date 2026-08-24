@@ -7,6 +7,11 @@ import {
 	Setting,
 } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
+import {
+	clearTTSCache,
+	getTTSCacheSize,
+	setTTSRate,
+} from "./tts";
 
 export interface ModelGroup {
 	/** 分组唯一 id（uuid 或固定字符串） */
@@ -48,6 +53,8 @@ export interface NihongAIExplainSettings {
 	targetLanguage: string;
 	/** 词典卡片字号（px），0=使用默认 */
 	dictFontSize: number;
+	/** TTS 朗读语速（0.5–3.0，1.0=正常） */
+	ttsRate: number;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -203,6 +210,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	requestTimeout: 120000,
 	targetLanguage: "中文",
 	dictFontSize: 0,
+	ttsRate: 1.0,
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -453,12 +461,51 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							this.plugin.settings.dictFontSize = n;
 							await this.plugin.saveSettings();
 							text.inputEl.style.borderColor = "";
-					} else {
-						text.inputEl.style.borderColor =
-							"var(--text-error)";
-					}
-			})
-	);
+						} else {
+							text.inputEl.style.borderColor =
+								"var(--text-error)";
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("朗读语速")
+			.setDesc(
+				"TTS 朗读语速倍率，范围 0.5–3.0，1.0 为正常速度。修改后下次朗读生效。",
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("1.0")
+					.setValue(String(this.plugin.settings.ttsRate))
+					.onChange(async (value) => {
+						const n = Number(value);
+						if (Number.isFinite(n) && n >= 0.5 && n <= 3.0) {
+							this.plugin.settings.ttsRate = n;
+							await this.plugin.saveSettings();
+							setTTSRate(n);
+							text.inputEl.style.borderColor = "";
+						} else {
+							text.inputEl.style.borderColor =
+								"var(--text-error)";
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("TTS 缓存")
+			.setDesc(
+				`LRU 缓存 TTS 音频，容量 128 条。当前 ${getTTSCacheSize()} 条。`,
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("清空缓存")
+					.setWarning()
+					.onClick(async () => {
+						clearTTSCache();
+						new Notice("TTS 缓存已清空");
+						this.display();
+					})
+			);
 
 	const cacheSetting = new Setting(containerEl)
 		.setName("翻译缓存")

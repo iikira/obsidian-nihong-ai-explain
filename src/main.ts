@@ -18,7 +18,13 @@ import { LRUTranslateCache } from "./translateCache";
 import { DictionaryManager } from "./dictionary/manager";
 import { DictionaryPopup } from "./dictionary/popup";
 import { centerRect } from "./popupUtils";
-import { speakText, stopSpeak } from "./tts";
+import {
+	speakText,
+	stopSpeak,
+	setTTSRate,
+	getTTSCacheSize,
+	clearTTSCache,
+} from "./tts";
 
 interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -62,6 +68,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		setTTSRate(this.settings.ttsRate);
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 
 		this.translateCard = new TranslateCard();
@@ -270,6 +277,16 @@ export default class NihongAIExplainPlugin extends Plugin {
 	/** 停止朗读 */
 	stopSpeak(): void {
 		stopSpeak();
+	}
+
+	/** TTS 缓存条数 */
+	ttsCacheSize(): number {
+		return getTTSCacheSize();
+	}
+
+	/** 清空 TTS 缓存 */
+	clearTTSCache(): void {
+		clearTTSCache();
 	}
 
 	/** 构造 pill actions（默认包含「朗读」按钮） */

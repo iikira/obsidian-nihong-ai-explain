@@ -7,9 +7,13 @@ const SPLIT_PATTERNS = [
 	/([\s])/,
 ];
 
+const TTS_CACHE_SIZE = 128;
+
 let currentAudio: HTMLAudioElement | null = null;
 let currentToken = 0;
 let lastBlobUrl: string | null = null;
+let currentRate = 1.0;
+const ttsCache = new Map<string, string>();
 
 function splitForTTS(text: string): string[] {
 	const trimmed = text.trim();
@@ -51,11 +55,60 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
+function getCache(text: string): string | null {
+	const url = ttsCache.get(text);
+	if (url === undefined) {
+		return null;
+	}
+	ttsCache.delete(text);
+	ttsCache.set(text, url);
+	return url;
+}
+
+function setCache(text: string, url: string): void {
+	if (ttsCache.has(text)) {
+		ttsCache.delete(text);
+	}
+	ttsCache.set(text, url);
+	while (ttsCache.size > TTS_CACHE_SIZE) {
+		const firstKey = ttsCache.keys().next().value;
+		if (firstKey === undefined) {
+			break;
+		}
+		const oldUrl = ttsCache.get(firstKey);
+		if (oldUrl) {
+			URL.revokeObjectURL(oldUrl);
+		}
+		ttsCache.delete(firstKey);
+	}
+}
+
+export function setTTSRate(rate: number): void {
+	currentRate = rate;
+}
+
+export function clearTTSCache(): void {
+	for (const url of ttsCache.values()) {
+		URL.revokeObjectURL(url);
+	}
+	ttsCache.clear();
+}
+
+export function getTTSCacheSize(): number {
+	return ttsCache.size;
+}
+
 async function fetchTTSBlob(text: string): Promise<string> {
+	const cached = getCache(text);
+	if (cached !== null) {
+		return cached;
+	}
 	const url = buildTTSURL(text);
 	const resp = await requestUrl({ url, method: "GET" });
 	const blob = new Blob([resp.arrayBuffer], { type: "audio/mpeg" });
-	return URL.createObjectURL(blob);
+	const blobUrl = URL.createObjectURL(blob);
+	setCache(text, blobUrl);
+	return blobUrl;
 }
 
 export function isTTSAvailable(): boolean {
@@ -116,17 +169,14 @@ export async function speakText(text: string): Promise<void> {
 			return;
 		}
 		if (token !== currentToken || failed) {
-			URL.revokeObjectURL(blobUrl);
 			return;
 		}
 
-		if (lastBlobUrl) {
-			URL.revokeObjectURL(lastBlobUrl);
-		}
 		lastBlobUrl = blobUrl;
 
 		const audio = new Audio(blobUrl);
 		audio.style.display = "none";
+		audio.playbackRate = currentRate;
 		currentAudio = audio;
 
 		if (!started) {
@@ -180,3 +230,4 @@ export async function speakText(text: string): Promise<void> {
 		});
 	}
 }
+
