@@ -87,6 +87,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		);
 		this.pill = new SelectionPill(this.buildPillActions());
 		this.pill.attach();
+		this.applyLexisPillDisabled();
 
 		this.registerEvent(
 			this.app.workspace.on("editor-menu", (menu, editor) => {
@@ -287,6 +288,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 	/** 清空 TTS 缓存 */
 	clearTTSCache(): void {
 		clearTTSCache();
+	}
+
+	/** 应用「禁用 Lexis 悬浮窗」开关到当前 pill */
+	applyLexisPillDisabled(): void {
+		this.pill?.setDisabledLexis(this.settings.disableLexisPill);
 	}
 
 	/** 构造 pill actions（默认包含「朗读」按钮） */

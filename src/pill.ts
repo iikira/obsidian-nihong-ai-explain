@@ -56,6 +56,8 @@ export class SelectionPill {
 	private pendingFallbackTimer: number | null = null;
 	private pendingSelectionDebounce: number | null = null;
 	private currentSelection = "";
+	/** 禁用 Lexis 悬浮窗（开关打开后 true）：不注入 Lexis pill，强制走自家 fallback */
+	private disabledLexis = false;
 
 	private boundMouseUp: (e: MouseEvent) => void;
 	private boundScroll: () => void;
@@ -84,6 +86,12 @@ export class SelectionPill {
 					}
 					const el = node as Element;
 					if (el.matches?.(LEXIS_PILL_SELECTOR)) {
+						if (this.disabledLexis) {
+							// 禁用 Lexis：立即移除 Lexis 自身的 pill，
+							// 让其悬浮窗完全不弹出
+							el.remove();
+							return;
+						}
 						this.injectInto(el);
 					}
 				});
@@ -98,7 +106,37 @@ export class SelectionPill {
 		this.refreshVisiblePill();
 	}
 
+	/**
+	 * 切换「禁用 Lexis 悬浮窗」开关。
+	 * - true：完全阻止 Lexis 自身悬浮窗弹出——检测到 .lexis-sel-pill 加入 DOM
+	 *   即立即移除；同时移除当前已存在的 Lexis pill。选区悬浮窗改用本插件
+	 *   自家 fallback pill。
+	 * - false：恢复 Lexis pill 注入逻辑。
+	 */
+	setDisabledLexis(disabled: boolean): void {
+		this.disabledLexis = disabled;
+		if (disabled) {
+			// 立即移除当前已存在的 Lexis pill
+			const existing = document.querySelector(LEXIS_PILL_SELECTOR);
+			if (existing instanceof HTMLElement) {
+				existing.remove();
+			}
+		} else {
+			// 恢复注入：对当前已显示的 Lexis pill 重新注入
+			this.refreshVisiblePill();
+		}
+	}
+
 	private refreshVisiblePill(): void {
+		// 禁用 Lexis 时：Lexis pill 已被 observer/setDisabledLexis 移除，
+		// 此处仅刷新自家 fallback（若在显示中）
+		if (this.disabledLexis) {
+			if (this.fallbackEl) {
+				this.hideFallback();
+				this.showFallback();
+			}
+			return;
+		}
 		const lexisPill = document.querySelector(LEXIS_PILL_SELECTOR);
 		if (lexisPill instanceof HTMLElement) {
 			this.clearInjectedButtons(lexisPill);
@@ -228,6 +266,10 @@ export class SelectionPill {
 
 	/** 当 lexis pill 出现时，把自己的按钮注入进去（去重） */
 	private injectInto(lePill: Element): void {
+		// 禁用 Lexis 时：完全不注入
+		if (this.disabledLexis) {
+			return;
+		}
 		// 仅当存在有效选区时才注入（避免 lexis 在我们选区已失效后仍弹 pill）
 		const sel = this.readSelection();
 		if (sel != null) {
@@ -341,8 +383,12 @@ export class SelectionPill {
 	// ====== Fallback pill（lexis 未弹时） ======
 
 	private showFallback(): void {
-		// 双保险：若 lexis 已弹 pill，不弹自家 fallback，避免重复
-		if (document.querySelector(LEXIS_PILL_SELECTOR)) {
+		// 双保险：未禁用 Lexis 时，若 lexis 已弹 pill 则不弹自家 fallback，避免重复
+		// （禁用模式下 Lexis pill 已被移除，此处必为 false，照常弹自家 fallback）
+		if (
+			!this.disabledLexis &&
+			document.querySelector(LEXIS_PILL_SELECTOR)
+		) {
 			return;
 		}
 		const sel = window.getSelection();

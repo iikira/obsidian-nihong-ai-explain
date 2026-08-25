@@ -5,6 +5,7 @@ import {
 	Platform,
 	PluginSettingTab,
 	Setting,
+	SliderComponent,
 } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 import {
@@ -55,6 +56,8 @@ export interface NihongAIExplainSettings {
 	dictFontSize: number;
 	/** TTS 朗读语速（0.5–3.0，1.0=正常） */
 	ttsRate: number;
+	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
+	disableLexisPill: boolean;
 }
 
 const DEFAULT_AGENT_MD = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
@@ -211,6 +214,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	targetLanguage: "中文",
 	dictFontSize: 0,
 	ttsRate: 1.0,
+	disableLexisPill: false,
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
@@ -469,27 +473,51 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("禁用 Lexis 悬浮窗")
+			.setDesc(
+				"开启后完全阻止 Lexis 选区悬浮窗弹出，改用本插件自带悬浮按钮。需重新选词生效。",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.disableLexisPill)
+					.onChange(async (value) => {
+						this.plugin.settings.disableLexisPill = value;
+						await this.plugin.saveSettings();
+						this.plugin.applyLexisPillDisabled();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("朗读语速")
 			.setDesc(
 				"TTS 朗读语速倍率，范围 0.5–3.0，1.0 为正常速度。修改后下次朗读生效。",
 			)
-			.addText((text) =>
-				text
-					.setPlaceholder("1.0")
-					.setValue(String(this.plugin.settings.ttsRate))
+			.addSlider((slider: SliderComponent) => {
+				// 在滑块右侧追加常驻数值 span
+				const valueSpan = document.createElement("span");
+				valueSpan.className = "nihong-ai-tts-rate-value";
+				valueSpan.style.marginLeft = "8px";
+				valueSpan.style.minWidth = "2.5em";
+				valueSpan.style.textAlign = "right";
+				valueSpan.setText(this.plugin.settings.ttsRate.toFixed(1));
+				slider.sliderEl.parentElement?.insertBefore(
+					valueSpan,
+					slider.sliderEl.nextSibling,
+				);
+
+				slider
+					.setLimits(0.5, 3.0, 0.1)
+					.setValue(this.plugin.settings.ttsRate)
+					.setDynamicTooltip()
 					.onChange(async (value) => {
-						const n = Number(value);
-						if (Number.isFinite(n) && n >= 0.5 && n <= 3.0) {
-							this.plugin.settings.ttsRate = n;
-							await this.plugin.saveSettings();
-							setTTSRate(n);
-							text.inputEl.style.borderColor = "";
-						} else {
-							text.inputEl.style.borderColor =
-								"var(--text-error)";
-						}
-					})
-			);
+						// 步长 0.1 浮点累差容错：四舍五入到一位小数
+						const n = Math.round(value * 10) / 10;
+						valueSpan.setText(n.toFixed(1));
+						this.plugin.settings.ttsRate = n;
+						await this.plugin.saveSettings();
+						setTTSRate(n);
+					});
+			});
 
 		new Setting(containerEl)
 			.setName("TTS 缓存")
