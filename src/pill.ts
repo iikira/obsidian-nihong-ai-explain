@@ -191,6 +191,8 @@ export class SelectionPill {
 			return;
 		}
 		this.currentSelection = sel;
+		// 选区变化：复位 fallback 按钮视觉（实际可点性由 main 层 tryStartTask 兜底）
+		this.resetFallbackButtons();
 		this.scheduleShowAfterSelection();
 	}
 
@@ -230,6 +232,8 @@ export class SelectionPill {
 				return;
 			}
 			this.currentSelection = cur;
+			// 选区变化：复位 fallback 按钮视觉（实际可点性由 main 层 tryStartTask 兜底）
+			this.resetFallbackButtons();
 			// 复用 mouseup 的"等 lexis / fallback"逻辑
 			this.scheduleShowAfterSelection();
 		}, SELECTION_DEBOUNCE_MS);
@@ -302,10 +306,10 @@ export class SelectionPill {
 				if (!text) {
 					return;
 				}
-				// 禁用整个 pill（含 lexis 自家按钮），防止重复调用
-				this.markPillBusy(lePill, true);
+				// 仅禁用被点击按钮自身；防重入由 main 的 tryStartTask 统一处理
+				this.markBusy(btn, true);
 				Promise.resolve(action.handler(text)).finally(() => {
-					this.markPillBusy(lePill, false);
+					this.markBusy(btn, false);
 				});
 			});
 			lePill.appendChild(btn);
@@ -370,12 +374,15 @@ export class SelectionPill {
 		}
 	}
 
-	/** 禁用 pill 内所有按钮（含 lexis 自家按钮与我们注入的按钮） */
-	private markPillBusy(pill: Element, busy: boolean): void {
-		const btns = pill.querySelectorAll(".lexis-sel-pill-btn, .nihong-ai-pill-btn");
+	/** 选区变化时复位 fallback pill 所有按钮的视觉状态（按钮实际可点性由 main 层 tryStartTask 兜底） */
+	private resetFallbackButtons(): void {
+		if (!this.fallbackEl) {
+			return;
+		}
+		const btns = this.fallbackEl.querySelectorAll(".nihong-ai-pill-btn");
 		btns.forEach((el) => {
 			if (el instanceof HTMLElement) {
-				this.markBusy(el, busy);
+				this.markBusy(el, false);
 			}
 		});
 	}
@@ -446,12 +453,11 @@ export class SelectionPill {
 				if (!text) {
 					return;
 				}
-				// 禁用整个 pill 所有按钮，防止重复调用
-				this.markPillBusy(div, true);
+				// 仅禁用被点击按钮自身；防重入由 main 的 tryStartTask 统一处理
+				// 不 hideFallback / currentSelection=""：保留 pill 供并行任务
+				this.markBusy(btn, true);
 				Promise.resolve(action.handler(text)).finally(() => {
-					this.markPillBusy(div, false);
-					this.hideFallback();
-					this.currentSelection = "";
+					this.markBusy(btn, false);
 				});
 			});
 			div.appendChild(btn);

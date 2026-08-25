@@ -272,7 +272,16 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	/** 朗读选区文本 */
 	speakText(text: string): void {
-		void speakText(text);
+		const clean = text.trim();
+		if (!clean) {
+			new Notice("选区为空");
+			return;
+		}
+		if (!this.tryStartTask("tts", clean)) {
+			new Notice(`「${clean}」正在朗读中`);
+			return;
+		}
+		void speakText(clean).finally(() => this.finishTask("tts", clean));
 	}
 
 	/** 停止朗读 */
@@ -293,6 +302,29 @@ export default class NihongAIExplainPlugin extends Plugin {
 	/** 应用「禁用 Lexis 悬浮窗」开关到当前 pill */
 	applyLexisPillDisabled(): void {
 		this.pill?.setDisabledLexis(this.settings.disableLexisPill);
+	}
+
+	/** 进行中任务集合：key = `${actionId}::${text}`，防止同 action+同 text 重复触发 */
+	private inFlightTasks = new Set<string>();
+
+	/** 构造任务键 */
+	private taskKey(actionId: string, text: string): string {
+		return `${actionId}::${text.trim()}`;
+	}
+
+	/** 尝试占用任务槽；同 actionId+同 text 已在跑时返回 false */
+	tryStartTask(actionId: string, text: string): boolean {
+		const key = this.taskKey(actionId, text);
+		if (this.inFlightTasks.has(key)) {
+			return false;
+		}
+		this.inFlightTasks.add(key);
+		return true;
+	}
+
+	/** 释放任务槽（任务结束调用） */
+	finishTask(actionId: string, text: string): void {
+		this.inFlightTasks.delete(this.taskKey(actionId, text));
 	}
 
 	/** 构造 pill actions（默认包含「朗读」按钮） */
@@ -504,46 +536,54 @@ export default class NihongAIExplainPlugin extends Plugin {
 			new Notice("选区为空");
 			return;
 		}
-		if (clean.length > MAX_WORD_LEN) {
-			new Notice(`选区过长（${clean.length} 字符），已截断使用前 ${MAX_WORD_LEN} 字符`);
-		}
-
-		const targetPath = this.resolveTargetPath(clean);
-		const existing = this.app.vault.getAbstractFileByPath(targetPath);
-		if (existing instanceof TFile) {
-			new Notice(`已存在，跳过: ${targetPath}`);
+		if (!this.tryStartTask("explain", clean)) {
+			new Notice(`「${clean}」AI 讲解任务进行中`);
 			return;
 		}
-
-		new Notice("正在生成…");
-		const messages = this.buildMessages(clean);
-		let content: string;
 		try {
-			content = await this.callModelWithRetry(
-				messages,
-				this.getExplainModelGroup(),
-			);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			new Notice(`生成失败: ${msg}`, 8000);
-			console.error("[nihong-ai-explain] 生成失败:", e);
-			return;
-		}
-
-		const dir = (this.settings.outputDir ?? "").trim();
-		try {
-			if (dir) {
-				await this.ensureFolder(dir);
+			if (clean.length > MAX_WORD_LEN) {
+				new Notice(`选区过长（${clean.length} 字符），已截断使用前 ${MAX_WORD_LEN} 字符`);
 			}
-			await this.app.vault.create(targetPath, content);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			new Notice(`写入文件失败: ${msg}`, 8000);
-			console.error("[nihong-ai-explain] 写入失败:", e);
-			return;
-		}
 
-		new Notice(`已生成: ${targetPath}`);
+			const targetPath = this.resolveTargetPath(clean);
+			const existing = this.app.vault.getAbstractFileByPath(targetPath);
+			if (existing instanceof TFile) {
+				new Notice(`已存在，跳过: ${targetPath}`);
+				return;
+			}
+
+			new Notice("正在生成…");
+			const messages = this.buildMessages(clean);
+			let content: string;
+			try {
+				content = await this.callModelWithRetry(
+					messages,
+					this.getExplainModelGroup(),
+				);
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				new Notice(`生成失败: ${msg}`, 8000);
+				console.error("[nihong-ai-explain] 生成失败:", e);
+				return;
+			}
+
+			const dir = (this.settings.outputDir ?? "").trim();
+			try {
+				if (dir) {
+					await this.ensureFolder(dir);
+				}
+				await this.app.vault.create(targetPath, content);
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				new Notice(`写入文件失败: ${msg}`, 8000);
+				console.error("[nihong-ai-explain] 写入失败:", e);
+				return;
+			}
+
+			new Notice(`已生成: ${targetPath}`);
+		} finally {
+			this.finishTask("explain", clean);
+		}
 	}
 
 	async translate(text: string): Promise<void> {
@@ -552,52 +592,60 @@ export default class NihongAIExplainPlugin extends Plugin {
 			new Notice("选区为空");
 			return;
 		}
-		if (!this.translateCard) {
-			this.translateCard = new TranslateCard();
-		}
-		if (!this.translateCache) {
-			this.translateCache = new LRUTranslateCache();
-			this.translateCache.load();
-		}
-
-		const target = this.settings.targetLanguage || "中文";
-		const cacheKey = JSON.stringify({ text: clean, target });
-		const rect = this.getSelectionRect() ?? this.fallbackRect();
-
-		// 缓存命中：静默显示，无任何提示
-		const cached = this.translateCache.get(cacheKey);
-		if (cached != null) {
-			this.translateCard.showResult(cached, rect);
+		if (!this.tryStartTask("translate", clean)) {
+			new Notice(`「${clean}」翻译任务进行中`);
 			return;
 		}
-
-		this.translateCard.showLoading(rect);
-
-		const messages: ChatMessage[] = [
-			{
-				role: "system",
-				content:
-					`你是一位专业译者。请将用户给出的文本翻译为${target}。` +
-					`要求：1) 只输出译文，不要输出任何解释、注释、引号、前后缀或寒暄；` +
-					`2) 保留原文的换行与段落结构；3) 保持自然、地道、忠实于原文语感。`,
-			},
-			{ role: "user", content: clean },
-		];
-
 		try {
-			const result = await this.callModelWithRetry(
-				messages,
-				this.getTranslateModelGroup(),
-				0.3,
-			);
-			this.translateCache.set(cacheKey, result);
-			const rectNow = this.getSelectionRect() ?? rect;
-			this.translateCard.showResult(result, rectNow);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			const rectNow = this.getSelectionRect() ?? rect;
-			this.translateCard.showError(`翻译失败: ${msg}`, rectNow);
-			console.error("[nihong-ai-explain] 翻译失败:", e);
+			if (!this.translateCard) {
+				this.translateCard = new TranslateCard();
+			}
+			if (!this.translateCache) {
+				this.translateCache = new LRUTranslateCache();
+				this.translateCache.load();
+			}
+
+			const target = this.settings.targetLanguage || "中文";
+			const cacheKey = JSON.stringify({ text: clean, target });
+			const rect = this.getSelectionRect() ?? this.fallbackRect();
+
+			// 缓存命中：静默显示，无任何提示
+			const cached = this.translateCache.get(cacheKey);
+			if (cached != null) {
+				this.translateCard.showResult(cached, rect);
+				return;
+			}
+
+			this.translateCard.showLoading(rect);
+
+			const messages: ChatMessage[] = [
+				{
+					role: "system",
+					content:
+						`你是一位专业译者。请将用户给出的文本翻译为${target}。` +
+						`要求：1) 只输出译文，不要输出任何解释、注释、引号、前后缀或寒暄；` +
+						`2) 保留原文的换行与段落结构；3) 保持自然、地道、忠实于原文语感。`,
+				},
+				{ role: "user", content: clean },
+			];
+
+			try {
+				const result = await this.callModelWithRetry(
+					messages,
+					this.getTranslateModelGroup(),
+					0.3,
+				);
+				this.translateCache.set(cacheKey, result);
+				const rectNow = this.getSelectionRect() ?? rect;
+				this.translateCard.showResult(result, rectNow);
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				const rectNow = this.getSelectionRect() ?? rect;
+				this.translateCard.showError(`翻译失败: ${msg}`, rectNow);
+				console.error("[nihong-ai-explain] 翻译失败:", e);
+			}
+		} finally {
+			this.finishTask("translate", clean);
 		}
 	}
 
@@ -607,35 +655,43 @@ export default class NihongAIExplainPlugin extends Plugin {
 			new Notice("选区为空");
 			return;
 		}
-		if (!this.dictionaryManager || !this.dictionaryManager.isReady) {
-			new Notice("词典未初始化，请先在设置中导入词典");
+		if (!this.tryStartTask("lookup", clean)) {
+			new Notice(`「${clean}」词典查询任务进行中`);
 			return;
 		}
-		const imported = await this.dictionaryManager.isImported();
-		if (!imported) {
-			new Notice("未导入词典，请先在设置中导入");
-			return;
-		}
-		if (!this.dictionaryPopup) {
-			this.dictionaryPopup = new DictionaryPopup(
-				(name) => this.dictionaryManager?.getTag(name),
-				(query) => this.lookupInPopup(query),
-				() => this.settings.dictFontSize,
-			);
-		}
-
-		const rect = this.getSelectionRect() ?? centerRect();
-		this.dictionaryPopup.showLoading(rect);
-
 		try {
-			const results = await this.dictionaryManager.lookup(clean);
-			const rectNow = this.getSelectionRect() ?? rect;
-			this.dictionaryPopup.showResult(results, rectNow);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			const rectNow = this.getSelectionRect() ?? rect;
-			this.dictionaryPopup.showError(`查询失败: ${msg}`, rectNow);
-			console.error("[nihong-ai-explain] 词典查询失败:", e);
+			if (!this.dictionaryManager || !this.dictionaryManager.isReady) {
+				new Notice("词典未初始化，请先在设置中导入词典");
+				return;
+			}
+			const imported = await this.dictionaryManager.isImported();
+			if (!imported) {
+				new Notice("未导入词典，请先在设置中导入");
+				return;
+			}
+			if (!this.dictionaryPopup) {
+				this.dictionaryPopup = new DictionaryPopup(
+					(name) => this.dictionaryManager?.getTag(name),
+					(query) => this.lookupInPopup(query),
+					() => this.settings.dictFontSize,
+				);
+			}
+
+			const rect = this.getSelectionRect() ?? centerRect();
+			this.dictionaryPopup.showLoading(rect);
+
+			try {
+				const results = await this.dictionaryManager.lookup(clean);
+				const rectNow = this.getSelectionRect() ?? rect;
+				this.dictionaryPopup.showResult(results, rectNow);
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				const rectNow = this.getSelectionRect() ?? rect;
+				this.dictionaryPopup.showError(`查询失败: ${msg}`, rectNow);
+				console.error("[nihong-ai-explain] 词典查询失败:", e);
+			}
+		} finally {
+			this.finishTask("lookup", clean);
 		}
 	}
 
