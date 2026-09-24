@@ -1,4 +1,4 @@
-import { setIcon } from "obsidian";
+import { setIcon, Platform } from "obsidian";
 
 const FALLBACK_PILL_ID = "nihong-ai-pill";
 const LEXIS_PILL_SELECTOR = ".lexis-sel-pill";
@@ -319,8 +319,27 @@ export class SelectionPill {
 		this.repositionPill(lePill);
 	}
 
+	/** 移动端固定位置：距底端 100px 居中显示 */
+	private static readonly MOBILE_FIXED_BOTTOM = 100;
+
+	/** 移动端把 pill 固定显示在距底端 100px、水平居中的位置 */
+	private positionFixedCenter(pill: HTMLElement): void {
+		pill.style.top = "";
+		pill.style.bottom = `${SelectionPill.MOBILE_FIXED_BOTTOM}px`;
+		pill.style.left = "50%";
+		pill.style.transform = "translateX(-50%)";
+	}
+
 	/** 重新定位 pill，确保不出视口；选区底部空间不足时弹到选区上方 */
 	private repositionPill(pill: Element): void {
+		const el = pill as HTMLElement;
+		// 移动端：固定位置显示（距底端 100px 居中），不跟随选区
+		if (Platform.isMobileApp) {
+			this.positionFixedCenter(el);
+			return;
+		}
+		el.style.transform = "";
+		el.style.bottom = "";
 		const sel = window.getSelection();
 		if (!sel || sel.rangeCount === 0) {
 			return;
@@ -329,7 +348,6 @@ export class SelectionPill {
 		if (!rect || (rect.width === 0 && rect.height === 0)) {
 			return;
 		}
-		const el = pill as HTMLElement;
 		// 强制布局以拿真实尺寸
 		const pw = el.offsetWidth;
 		const ph = el.offsetHeight;
@@ -408,6 +426,15 @@ export class SelectionPill {
 		}
 		this.ensureFallbackEl();
 		const el = this.fallbackEl!;
+		// 移动端：固定位置（距底端 100px 居中），不跟随选区
+		if (Platform.isMobileApp) {
+			el.style.transform = "";
+			this.positionFixedCenter(el);
+			el.style.display = "inline-flex";
+			return;
+		}
+		el.style.bottom = "";
+		el.style.transform = "";
 		const gap = 6;
 		const pillW = 28 + this.actions.length * 70;
 		let top = rect.bottom + gap + window.scrollY;
