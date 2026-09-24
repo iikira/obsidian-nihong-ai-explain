@@ -19,6 +19,12 @@ import { DictionaryManager } from "./dictionary/manager";
 import { DictionaryPopup } from "./dictionary/popup";
 import { centerRect } from "./popupUtils";
 import {
+	MAX_TOOL_ROUNDS,
+	MOJI_TOOL_SCHEMA,
+	dispatchTool,
+	type ParsedToolCall,
+} from "./mojidict";
+import {
 	speakText,
 	stopSpeak,
 	setTTSRate,
@@ -26,9 +32,27 @@ import {
 	clearTTSCache,
 } from "./tts";
 
+/** tool_call 中的函数调用 */
+interface ToolCall {
+	id: string;
+	type: "function";
+	function: { name: string; arguments: string };
+}
+
+/** 支持 tool-use 的聊天消息 */
 interface ChatMessage {
-	role: "system" | "user" | "assistant";
-	content: string;
+	role: "system" | "user" | "assistant" | "tool";
+	content: string | null;
+	tool_calls?: ToolCall[];
+	tool_call_id?: string;
+}
+
+/** 流式 SSE delta 中的 tool_calls 分片 */
+interface DeltaToolCall {
+	index?: number;
+	id?: string;
+	type?: "function";
+	function?: { name?: string; arguments?: string };
 }
 
 interface ChatChoice {
@@ -37,11 +61,29 @@ interface ChatChoice {
 		reasoning_content?: string;
 		reasoning?: string;
 	};
+	delta?: {
+		content?: string;
+		tool_calls?: DeltaToolCall[];
+	};
+	finish_reason?: string | null;
+}
+
+interface UsageInfo {
+	prompt_tokens: number;
+	completion_tokens: number;
+	reasoning_tokens: number;
 }
 
 interface ChatCompletionResponse {
 	choices?: ChatChoice[];
 	error?: { message?: string };
+	usage?: {
+		prompt_tokens?: number;
+		input_tokens?: number;
+		completion_tokens?: number;
+		output_tokens?: number;
+		completion_tokens_details?: { reasoning_tokens?: number };
+	};
 }
 
 interface PerfRecord {
@@ -57,6 +99,154 @@ interface PerfRecord {
 
 const MAX_WORD_LEN = 100;
 const FORBIDDEN_NAME_CHARS = /[\\/:*?"<>|]/g;
+
+/** AI 讲解内置系统提示词（照搬 nihong_explain_agent/agent.md 最终版） */
+const EXPLAIN_SYSTEM_PROMPT = `你是一位日语词汇讲解专家。请对用户给出的日语单词，输出一份结构化、准确、富有语感与文化背景的详解。
+
+输出必须严格符合下方模板与规则，禁止输出任何模板之外的寒暄、解释或前后缀。
+
+---
+
+## 输出模板
+
+> 开篇直接以「## 一、词性与含义」起始，**不要**输出任何标题行（如「**「寄る（よる）」详解**」）和其下的分隔线 \`---\`。整篇以「## 一、」开始，以「## 六、语感」段落结束。
+
+## 一、词性与含义
+
+**{单词}（{假名读音}）{声调}**
+
+> 单词含汉字时，必须以「汉字（假名）」形式给出读音，例如「寄る（よる）」「夫婦（ふうふ）」「結ぶ（むすぶ）」；单词本身仅为假名时，**不要**写出该假名。声调（如 ⓪①②③ 等）标注在假名读音之后，必须取自 \`search_dictionary\` 工具返回结果，无则留空，禁止臆造。后续各节再出现该词的汉字形式时，**禁止**再附上假名与声调，保证假名与声调只在开头出现一次。
+
+**{词性}**
+
+> 词性须标注完整：①基本类别（名词/动词/形容词/副词/惯用表达等）；②若为动词，必须标明**自动词或他动词或自他动词**，格式如「动词（自动词，五段）」「动词（他动词，一段）」「动词（自他动词，一段）」；若该动词存在自/他成对词，须在本节末尾用一行说明其配对词，例如：「对应他动词：寄せる」「对应自动词：寄る」。
+
+含义：
+1. **{义项1}**（{简短释义}）
+2. **{义项2}**（{简短释义}）
+...（若为单一义项的词/惯用表达，则改为一段话形式说明，并加粗关键词）
+
+> 含义须点明语感核心，例如"费心、顾及他人感受"。
+
+---
+
+## 二、{逐词解析 | 主要用法}
+
+- 若单词为单一短语/惯用表达（如「気を遣う」）：使用「逐词解析」小节，给出拆分表格：
+
+### 逐词解析
+
+| 部分 | 解析 |
+|------|------|
+| {部分1} | {含义} |
+| {部分2} | {含义} |
+| ... | ... |
+
+字面即"{字面组合}" → {引申含义}。
+
+- 若单词为多义动词/独立词（如「寄る」）：使用「主要用法」小节，按义项分小节展开：
+
+### 主要用法
+
+#### ① {义项名}
+
+| 搭配 | 含义 |
+|------|------|
+| {搭配1} | {含义} |
+| ... | ... |
+
+例句：
+- {日文例句}。（{中文译文}）
+- ...
+
+#### ② {义项名}
+...（每个义项重复以上结构）
+
+---
+
+## 三、{常用搭配与例句 | 常见复合词与惯用表达}
+
+- 单一义项/惯用表达：使用「常用搭配与例句」：
+
+| 搭配 | 含义 |
+|------|------|
+| {搭配1} | {含义} |
+| ... | ... |
+
+例句：
+- {日文例句}。（{中文译文}）
+- ...
+
+- 多义独立词：使用「常见复合词与惯用表达」：
+
+| 表达 | 含义 |
+|------|------|
+| {复合词1}（{读音}） | {含义} |
+| ... | ... |
+
+---
+
+## 四、近义词对比
+
+| {词/表达} | 侧重 |
+|------|------|
+| {近义词1} | {侧重说明} |
+| ... | ... |
+
+---
+
+## 五、对比示例（可选，多义/易混词时给出）
+
+| 例句 | 语感 |
+|------|------|
+| {例句}（{说明}） | {对应词} |
+| ... | ... |
+
+> 若与近义词区分度不大，可省略本节。
+
+---
+
+## 六、语感
+
+{对单词的整体语感、文化背景、使用场景、两面性等的说明段落。强调该词在日本人生活/人际交往中的角色，体现温度与人情味，2~4 句。}
+
+---
+
+## 工具使用
+
+1. **讲解前必须先查词典**：讲解任何日语单词前，**必须先调用 \`search_dictionary\` 工具**查询，确认读音、声调、词性后再开始讲解。禁止不查词典直接讲解。
+2. **变形用原型查询**：用户输入若是动词/形容词的各种变形（ます形/て形/た形/ない形等），**必须先用其辞书形（原型）调用 \`search_dictionary\`**，而非用变形去查。
+3. **重点关注声调**：词典返回的词条标题里通常带声调，形如 \`寄る | よる ⓪ | N2·N4\`，其中 \`⓪\` 即声调。请提取该声调（⓪①②③④…），并在「## 一、词性与含义」首行的假名读音后标注，格式：\`**寄る（よる）⓪**\`。若词典未给出声调则留空，禁止臆造。
+
+---
+
+## 规则
+
+1. **读音**：模板各处假名读音必须准确。
+2. **声调**：「## 一、词性与含义」首行格式为 \`**{单词}（{假名读音}）{声调}**\`，声调必须取自 \`search_dictionary\` 工具返回结果（如 ⓪①②③），无则留空，禁止臆造；声调与假名读音只在开头出现一次，后续各节不再重复。
+3. **动词变形处理**：用户输入可能是动词的各种变形（ます形/て形/た形/ない形/可能形/受身形/使役形/命令形/假定形/意向形等）。无论输入为何种变形：
+   - 必须先识别并还原其**辞书形**，全程围绕**辞书形**展开讲解（词性、含义、用法、例句一律使用原型）。
+   - 在「## 一、词性与含义」节首行用一句话说明：「输入「{用户原输入}」为动词「{原型}」的{变形种类}形，以下以原型「{原型}」进行讲解。」之后再写词性与含义。如果用户输入的动词是辞书形，则不用进行说明。
+   - 例如输入「寄りました」→ 写明其为「寄る」的ます形过去式，下文一律用「寄る」。
+   - 如果输入的不是动词，则本条规则不适用。
+4. **自/他动词**：凡涉及动词，必须在词性标注中明确「自动词」或「他动词」或「自他动词」；若存在成对词，须在「## 一、」末尾给出对应词（自→他或他→自），并在「## 四、近义词对比」中将该成对词列入并点明侧重差异（如「侧重动作施加于对象，强调致使/改变」）。
+5. **多义词**：义项须全面覆盖主要用法，必要时拆为「主要用法」分小节展开。
+6. **单一短语**：拆解每个构成词，给出字面 → 引申的推理。
+7. **例句**：每个义项/搭配至少给出 1~2 条自然地道的日文例句，并附中文译文；动词一律用原型辞书形或常规活用，避免用变形作为讲解主体。
+8. **近义词对比**：至少列出 3~5 个近义/相关表达，点明侧重差异。
+9. **语感**：从文化、人际、情感角度收束，避免空泛。
+10. **格式**：严格使用 Markdown；表格列名统一为「搭配/表达/词」「含义/侧重」；不输出代码围栏包裹整体内容。
+11. **开篇要求**：第一行必须为「## 一、词性与含义」，**禁止**在前面输出单词标题行（如「**「寄る（よる）」详解**」）或任何 \`---\` 分隔线；结尾即「## 六、语感」段落结束。
+
+## 输入
+
+用户将提供一个日语单词（汉字或假名、原型或变形均可）。请按上述模板与规则生成完整详解。`;
+
+/** 翻译内置系统提示词（目标语言参数化） */
+const TRANSLATE_SYSTEM_PROMPT = (target: string): string =>
+	`你是一位专业译者。请将用户给出的文本翻译为${target}。` +
+	`要求：1) 只输出译文，不要输出任何解释、注释、引号、前后缀或寒暄；` +
+	`2) 保留原文的换行与段落结构；3) 保持自然、地道、忠实于原文语感。`;
 
 export default class NihongAIExplainPlugin extends Plugin {
 	settings!: NihongAIExplainSettings;
@@ -222,14 +412,6 @@ export default class NihongAIExplainPlugin extends Plugin {
 				throw e;
 			}
 		}
-	}
-
-	private buildMessages(word: string): ChatMessage[] {
-		const user = this.settings.userPromptTemplate.replace(/\{\{word\}\}/g, word);
-		return [
-			{ role: "system", content: this.settings.systemPrompt },
-			{ role: "user", content: user },
-		];
 	}
 
 	/**
@@ -530,6 +712,301 @@ export default class NihongAIExplainPlugin extends Plugin {
 		throw new Error(`重试 ${max} 次后仍失败: ${finalMsg}`);
 	}
 
+	/** 解析 SSE 流式响应，聚合 content / tool_calls / usage / finish_reason */
+	private async parseStream(
+		reader: ReadableStreamDefaultReader<Uint8Array>,
+	): Promise<{
+		content: string;
+		toolCalls: ParsedToolCall[];
+		usage: UsageInfo;
+		finishReason: string | null;
+	}> {
+		const decoder = new TextDecoder();
+		const contentParts: string[] = [];
+		const toolCallsMap = new Map<
+			number,
+			{ id: string; name: string; arguments: string }
+		>();
+		let usage: UsageInfo = {
+			prompt_tokens: 0,
+			completion_tokens: 0,
+			reasoning_tokens: 0,
+		};
+		let finishReason: string | null = null;
+		let buf = "";
+
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			buf += decoder.decode(value, { stream: true });
+			const lines = buf.split("\n");
+			// 保留最后未完整的一行
+			buf = lines.pop() ?? "";
+			for (let line of lines) {
+				line = line.trim();
+				if (!line.startsWith("data:")) {
+					continue;
+				}
+				const chunk = line.slice(5).trim();
+				if (chunk === "[DONE]") {
+					break;
+				}
+				let obj: ChatCompletionResponse;
+				try {
+					obj = JSON.parse(chunk) as ChatCompletionResponse;
+				} catch {
+					continue;
+				}
+				if (obj.usage) {
+					const u = obj.usage;
+					usage = {
+						prompt_tokens:
+							u.prompt_tokens ?? u.input_tokens ?? 0,
+						completion_tokens:
+							u.completion_tokens ?? u.output_tokens ?? 0,
+						reasoning_tokens:
+							u.completion_tokens_details?.reasoning_tokens ??
+							0,
+					};
+				}
+				const choices = obj.choices ?? [];
+				if (choices.length === 0) {
+					continue;
+				}
+				const ch = choices[0];
+				if (ch.finish_reason) {
+					finishReason = ch.finish_reason;
+				}
+				const delta = ch.delta;
+				if (!delta) {
+					continue;
+				}
+				if (delta.content) {
+					contentParts.push(delta.content);
+				}
+				for (const tc of delta.tool_calls ?? []) {
+					const idx = tc.index ?? 0;
+					const entry =
+						toolCallsMap.get(idx) ??
+						{ id: "", name: "", arguments: "" };
+					if (tc.id) {
+						entry.id = tc.id;
+					}
+					if (tc.function?.name) {
+						entry.name = tc.function.name;
+					}
+					if (tc.function?.arguments) {
+						entry.arguments += tc.function.arguments;
+					}
+					toolCallsMap.set(idx, entry);
+				}
+			}
+		}
+
+		const toolCalls: ParsedToolCall[] = [];
+		for (const idx of [...toolCallsMap.keys()].sort((a, b) => a - b)) {
+			const entry = toolCallsMap.get(idx)!;
+			let args: Record<string, unknown> = {};
+			if (entry.arguments) {
+				try {
+					args = JSON.parse(entry.arguments) as Record<
+						string,
+						unknown
+					>;
+				} catch {
+					args = {};
+				}
+			}
+			toolCalls.push({
+				id: entry.id || `call_${idx}`,
+				name: entry.name,
+				arguments: args,
+				argumentsRaw: entry.arguments,
+			});
+		}
+
+		return {
+			content: contentParts.join(""),
+			toolCalls,
+			usage,
+			finishReason,
+		};
+	}
+
+	/** 发起一轮流式请求（带重试），返回解析后的 content/tool_calls/usage/finish */
+	private async callStreamRound(
+		messages: ChatMessage[],
+		group: ModelGroup,
+		withTools: boolean,
+	): Promise<{
+		content: string;
+		toolCalls: ParsedToolCall[];
+		usage: UsageInfo;
+		finishReason: string | null;
+	}> {
+		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+			Accept: "text/event-stream",
+		};
+		if (group.apiKey) {
+			headers["Authorization"] = `Bearer ${group.apiKey}`;
+		}
+		const body: Record<string, unknown> = {
+			model: group.modelId,
+			messages,
+			temperature: this.settings.temperature,
+			stream: true,
+		};
+		Object.assign(body, this.buildDisableThinking(group.modelId));
+		if (withTools) {
+			body["tools"] = MOJI_TOOL_SCHEMA;
+			body["tool_choice"] = "auto";
+		}
+
+		const max = Math.max(0, this.settings.maxRetries);
+		let lastErr: unknown = null;
+		for (let attempt = 1; attempt <= max; attempt++) {
+			try {
+				const resp = await fetch(url, {
+					method: "POST",
+					headers,
+					body: JSON.stringify(body),
+				});
+				if (!resp.ok || !resp.body) {
+					const errText = await resp.text().catch(() => "");
+					throw new Error(
+						`流式请求失败: HTTP ${resp.status} ${errText.slice(0, 200)}`,
+					);
+				}
+				const reader = resp.body.getReader();
+				try {
+					return await this.parseStream(reader);
+				} finally {
+					reader.releaseLock();
+				}
+			} catch (e) {
+				lastErr = e;
+				const msg = e instanceof Error ? e.message : String(e);
+				console.warn(
+					`[nihong-ai-explain] 第 ${attempt}/${max} 次流式失败: ${msg}`,
+				);
+				if (attempt < max) {
+					await this.sleep(this.settings.retryInterval);
+				}
+			}
+		}
+		const finalMsg =
+			lastErr instanceof Error ? lastErr.message : String(lastErr);
+		throw new Error(`流式重试 ${max} 次后仍失败: ${finalMsg}`);
+	}
+
+	/** 打印单轮 token 用量诊断 */
+	private logTokenUsage(round: number, usage: UsageInfo): void {
+		console.log(
+			`[nihong-ai-explain] 第 ${round} 轮 token: ` +
+				`输入=${usage.prompt_tokens} ` +
+				`输出=${usage.completion_tokens} ` +
+				`思考=${usage.reasoning_tokens} ` +
+				`合计=${usage.prompt_tokens + usage.completion_tokens}`,
+		);
+	}
+
+	/** 打印整个讲解流程累加 token 用量 */
+	private logTokenTotal(total: UsageInfo): void {
+		console.log(
+			`[nihong-ai-explain] token 合计: ` +
+				`输入=${total.prompt_tokens} ` +
+				`输出=${total.completion_tokens} ` +
+				`思考=${total.reasoning_tokens} ` +
+				`合计=${total.prompt_tokens + total.completion_tokens}`,
+		);
+	}
+
+	/**
+	 * AI 讲解 tool-use 循环：引导模型先调 search_dictionary 查词典（须用原型），
+	 * 代码本地执行查词典并把结果回灌给模型，模型拿到结果后生成最终讲解。
+	 */
+	private async runExplainToolLoop(
+		messages: ChatMessage[],
+		group: ModelGroup,
+		deviceId: string,
+		token: string,
+	): Promise<string> {
+		const total: UsageInfo = {
+			prompt_tokens: 0,
+			completion_tokens: 0,
+			reasoning_tokens: 0,
+		};
+
+		for (let rnd = 1; rnd <= MAX_TOOL_ROUNDS; rnd++) {
+			const { content, toolCalls, usage, finishReason } =
+				await this.callStreamRound(messages, group, true);
+			total.prompt_tokens += usage.prompt_tokens;
+			total.completion_tokens += usage.completion_tokens;
+			total.reasoning_tokens += usage.reasoning_tokens;
+			this.logTokenUsage(rnd, usage);
+
+			// 无工具调用：模型给出最终讲解
+			if (toolCalls.length === 0) {
+				console.log(
+					`[nihong-ai-explain] 第 ${rnd} 轮返回最终讲解（finish=${finishReason}）`,
+				);
+				this.logTokenTotal(total);
+				return content;
+			}
+
+			// 有工具调用：追加 assistant 消息（带 tool_calls）+ 回灌 tool 结果
+			messages.push({
+				role: "assistant",
+				content: content || null,
+				tool_calls: toolCalls.map((tc) => ({
+					id: tc.id,
+					type: "function" as const,
+					function: {
+						name: tc.name,
+						arguments: tc.argumentsRaw,
+					},
+				})),
+			});
+
+			for (const tc of toolCalls) {
+				console.log(
+					`[nihong-ai-explain] 第 ${rnd} 轮调用工具 ${tc.name}(${JSON.stringify(tc.arguments)})`,
+				);
+				const resultStr = await dispatchTool(
+					tc.name,
+					tc.arguments,
+					deviceId,
+					token,
+				);
+				messages.push({
+					role: "tool",
+					tool_call_id: tc.id,
+					content: resultStr,
+				});
+			}
+		}
+
+		// 超过最大轮数：去掉 tools 兜底强制生成
+		console.log(
+			`[nihong-ai-explain] 达到最大轮数 ${MAX_TOOL_ROUNDS}，兜底强制生成`,
+		);
+		const { content, usage } = await this.callStreamRound(
+			messages,
+			group,
+			false,
+		);
+		total.prompt_tokens += usage.prompt_tokens;
+		total.completion_tokens += usage.completion_tokens;
+		total.reasoning_tokens += usage.reasoning_tokens;
+		this.logTokenUsage(MAX_TOOL_ROUNDS + 1, usage);
+		this.logTokenTotal(total);
+		return content;
+	}
+
 	async explain(word: string): Promise<void> {
 		const clean = word.trim();
 		if (!clean) {
@@ -553,12 +1030,22 @@ export default class NihongAIExplainPlugin extends Plugin {
 			}
 
 			new Notice("正在生成…");
-			const messages = this.buildMessages(clean);
-			let content: string;
+			const group = this.getExplainModelGroup();
+			const deviceId = this.settings.mojiDeviceId ?? "";
+			const token = this.settings.mojiToken ?? "";
+
+			const messages: ChatMessage[] = [
+				{ role: "system", content: EXPLAIN_SYSTEM_PROMPT },
+				{ role: "user", content: `请讲解以下日语单词：${clean}` },
+			];
+
+			let content = "";
 			try {
-				content = await this.callModelWithRetry(
+				content = await this.runExplainToolLoop(
 					messages,
-					this.getExplainModelGroup(),
+					group,
+					deviceId,
+					token,
 				);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
@@ -621,10 +1108,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 			const messages: ChatMessage[] = [
 				{
 					role: "system",
-					content:
-						`你是一位专业译者。请将用户给出的文本翻译为${target}。` +
-						`要求：1) 只输出译文，不要输出任何解释、注释、引号、前后缀或寒暄；` +
-						`2) 保留原文的换行与段落结构；3) 保持自然、地道、忠实于原文语感。`,
+					content: TRANSLATE_SYSTEM_PROMPT(target),
 				},
 				{ role: "user", content: clean },
 			];
