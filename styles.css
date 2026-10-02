@@ -332,3 +332,43 @@
 	padding: 8px 0;
 }
 
+/* 「模型 id」下拉框：输入框 + 下拉面板 */
+.nihong-ai-model-field .setting-item {
+	position: relative;
+}
+
+.nihong-ai-model-panel {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	z-index: var(--layer-popover, 50);
+	max-height: 200px;
+	overflow-y: auto;
+	margin-top: 2px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 4px;
+	box-sizing: border-box;
+}
+
+.nihong-ai-model-option {
+	padding: 6px 10px;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--text-normal);
+	font-style: normal;
+	border-radius: 4px;
+}
+
+.nihong-ai-model-option:hover {
+	background: var(--background-modifier-hover);
+}
+
+

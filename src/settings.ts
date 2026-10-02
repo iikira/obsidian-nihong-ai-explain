@@ -6,6 +6,7 @@ import {
 	PluginSettingTab,
 	Setting,
 	SliderComponent,
+	requestUrl,
 } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 import {
@@ -93,6 +94,10 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 	private activeDropdown: DropdownComponent | null = null;
 	/** 当前激活分组的编辑区容器（只显示一个分组），切换下拉框时重渲染 */
 	private activeGroupContainer: HTMLDivElement | null = null;
+	/** 当前激活分组「模型 id」下拉面板（列出 /v1/models 返回的模型，点击选择） */
+	private activeModelListPanel: HTMLDivElement | null = null;
+	/** 当前激活分组「模型 id」输入框引用（选择模型时回填用） */
+	private activeModelInput: HTMLInputElement | null = null;
 
 	constructor(app: App, plugin: NihongAIExplainPlugin) {
 		super(app, plugin);
@@ -530,6 +535,81 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		this.renderActiveGroup();
 	}
 
+	/**
+	 * 拉取当前分组的模型列表（GET {apiUrl}/models，apiKey 非空时带 Authorization 头），
+	 * 填充「模型 id」下拉面板的可选项。失败时在面板里提示，不影响手动输入。
+	 */
+	private async refreshModelList(g: ModelGroup): Promise<void> {
+		const panel = this.activeModelListPanel;
+		if (!panel) {
+			return;
+		}
+		panel.empty();
+		const base = (g.apiUrl ?? "").trim().replace(/\/+$/, "");
+		if (!base) {
+			panel.setText("未配置 API 地址，无法拉取模型列表");
+			return;
+		}
+		const url = `${base}/models`;
+		const headers: Record<string, string> = {};
+		if (g.apiKey) {
+			headers["Authorization"] = `Bearer ${g.apiKey}`;
+		}
+		let ids: string[];
+		try {
+			const resp = await requestUrl({ url, method: "GET", headers, throw: false });
+			if (resp.status < 200 || resp.status >= 300) {
+				console.warn(`[nihong-ai] 拉取模型列表 HTTP ${resp.status}: ${url}`);
+				panel.setText(`拉取失败（HTTP ${resp.status}），可手动输入模型 id`);
+				return;
+			}
+			const data = (resp.json as { data?: { id?: string }[] }).data ?? [];
+			ids = data.map((m) => m.id).filter((x): x is string => !!x);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			console.warn(`[nihong-ai] 拉取模型列表失败: ${msg}`);
+			panel.setText("拉取失败，可手动输入模型 id");
+			return;
+		}
+		if (ids.length === 0) {
+			panel.setText("端点未返回任何模型，可手动输入");
+			return;
+		}
+		for (const id of ids) {
+			const item = panel.createDiv({ text: id, cls: "nihong-ai-model-option" });
+			item.addEventListener("click", () => {
+				const input = this.activeModelInput;
+				if (input) {
+					input.value = id;
+					input.dispatchEvent(new Event("input", { bubbles: true }));
+				}
+				this.hideModelListPanel();
+			});
+		}
+	}
+
+	/** 隐藏并清空当前分组的模型下拉面板 */
+	private hideModelListPanel(): void {
+		if (this.activeModelListPanel) {
+			this.activeModelListPanel.style.display = "none";
+		}
+	}
+
+	/** 显示当前分组模型下拉面板；尚未拉取时先拉取 */
+	private showModelListPanel(g: ModelGroup): void {
+		const panel = this.activeModelListPanel;
+		if (!panel) {
+			return;
+		}
+		// 面板隐藏时切换为显示；已显示则收起
+		if (panel.style.display !== "block") {
+			panel.style.display = "block";
+			void this.refreshModelList(g);
+		} else {
+			panel.style.display = "none";
+		}
+	}
+
 	/** 只渲染当前激活的分组（标题行 + 3 个字段行） */
 	private renderActiveGroup(): void {
 		const host = this.activeGroupContainer;
@@ -626,21 +706,38 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				text.onChange(async (value) => {
 					g.apiUrl = value.trim();
 					await this.plugin.saveSettings();
+					// 地址变更后重新拉取模型列表
+					void this.refreshModelList(g);
 				});
 			});
 
 		// 模型 id
 		new Setting(host)
 			.setName("模型 id")
-			.setClass("nihong-ai-group-field")
+			.setDesc("可从下拉选择端点返回的模型，也可手动输入任意模型 id。")
+			.setClass("nihong-ai-group-field nihong-ai-model-field")
 			.addText((text) => {
 				text.setPlaceholder("如 gpt-4o / hy3-free / deepseek-v4");
 				text.inputEl.classList.add("nihong-ai-group-input");
 				text.setValue(g.modelId);
+				this.activeModelInput = text.inputEl;
+				// 创建下拉面板（挂在所在 setting-item 内，绝对定位到输入框下方）
+				const row = text.inputEl.closest(".setting-item");
+				let panel = row?.querySelector<HTMLDivElement>(".nihong-ai-model-panel");
+				if (row && !panel) {
+					panel = row.createDiv({ cls: "nihong-ai-model-panel" });
+					panel.style.display = "none";
+					this.activeModelListPanel = panel;
+				}
 				text.onChange(async (value) => {
 					g.modelId = value.trim();
 					await this.plugin.saveSettings();
 				});
+			})
+			.addExtraButton((btn) => {
+				btn.setIcon("chevron-down")
+					.setTooltip("选择模型")
+					.onClick(() => this.showModelListPanel(g));
 			});
 
 		// API Key
@@ -656,6 +753,8 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				text.onChange(async (value) => {
 					g.apiKey = value;
 					await this.plugin.saveSettings();
+					// Key 变更后重新拉取模型列表（鉴权头变化）
+					void this.refreshModelList(g);
 				});
 			});
 	}
