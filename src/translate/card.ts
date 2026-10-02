@@ -1,4 +1,4 @@
-import { positionCard } from "./popupUtils";
+import { positionCard } from "../popupUtils";
 
 const CARD_CLASS = "nihong-ai-translate-card";
 
