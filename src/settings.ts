@@ -393,34 +393,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 	// ====== 词典管理 ======
 
-		containerEl.createEl("h3", { text: "MOJI" });
-
-		new Setting(containerEl)
-			.setName("MOJI Device ID")
-			.setDesc("MOJI 查询用的 Device ID。留空则查询时不带 X-Moji-Device-Id 等请求头。")
-			.addText((text) =>
-				text
-					.setPlaceholder("留空=不带相关请求头")
-					.setValue(this.plugin.settings.mojiDeviceId)
-					.onChange(async (value) => {
-						this.plugin.settings.mojiDeviceId = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("MOJI Token")
-			.setDesc("MOJI 查询用的 Token。留空则查询时不带 X-Moji-Session-Id / X-Moji-Token 请求头。")
-			.addText((text) =>
-				text
-					.setPlaceholder("留空=不带相关请求头")
-					.setValue(this.plugin.settings.mojiToken)
-					.onChange(async (value) => {
-						this.plugin.settings.mojiToken = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
-
 		containerEl.createEl("h3", { text: "离线词典" });
 
 		new Setting(containerEl)

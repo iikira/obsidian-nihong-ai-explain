@@ -1,6 +1,6 @@
 # obsidian-nihong-ai-explain
 
-一个 Obsidian 插件：选中一段日文文字，在选区下方弹出按钮「AI 讲解」，点击后调用大模型生成讲解笔记，自动保存为 `<输出目录>/<选中文字>.md`。
+一个 Obsidian 插件：**霓虹AI讲解**。选中一段日文文字，在选区下方弹出按钮「AI 讲解」，点击后调用大模型生成讲解笔记，自动保存为 `<输出目录>/<选中文字>.md`；同时支持翻译、离线查词典与朗读。
 
 ## 功能
 
@@ -19,11 +19,11 @@ npm install
 npm run build
 ```
 
-把 `dist/` 目录整个复制为 `<vault>/.obsidian/plugins/nihong-ai-explain/`（其中已包含 `main.js`、`manifest.json`、`styles.css`），然后在 Obsidian 的 `Settings → Community plugins` 中启用「日语 AI 讲解」。
+把 `dist/` 目录整个复制为 `<vault>/.obsidian/plugins/nihong-ai-explain/`（其中已包含 `main.js`、`manifest.json`、`styles.css`），然后在 Obsidian 的 `Settings → Community plugins` 中启用「霓虹AI讲解」。
 
 ## 配置
 
-在 `Settings → 日语 AI 讲解`：
+在 `Settings → 霓虹AI讲解`：
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -36,8 +36,6 @@ npm run build
 | 重试间隔 | `2000` ms | |
 | 单次请求超时 | `120000` ms | |
 | 翻译目标语言 | `中文` | |
-| MOJI Device ID | （空） | MOJI 词典查询用，留空则请求时不带 `X-Moji-Device-Id` 等头 |
-| MOJI Token | （空） | MOJI 词典查询用，留空则请求时不带 `X-Moji-Session-Id` / `X-Moji-Token` 头 |
 
 默认大模型分组：API 地址 `https://opencode.ai/zen/v1`，模型 `hy3-free`，API Key 留空（不发 `Authorization` 头）。
 

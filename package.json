@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-nihong-ai-explain",
 	"version": "0.1.0",
-	"description": "选中日语单词，一键调用大模型生成讲解并保存为笔记。",
+	"description": "选中日语单词或句子，AI 讲解生成详解笔记、翻译、离线查词典与朗读。",
 	"main": "main.js",
 	"type": "commonjs",
 	"scripts": {
@@ -15,7 +15,7 @@
 		"japanese",
 		"ai"
 	],
-	"author": "syy",
+	"author": "iikira",
 	"license": "MIT",
 	"dependencies": {
 		"fflate": "^0.8.2",
