@@ -118,6 +118,7 @@
 	border-radius: 8px;
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 	padding: 12px 14px;
+	font-family: var(--font-text, var(--font-interface));
 	font-size: var(--nihong-ai-dict-fs, 14px);
 	line-height: 1.6;
 	-webkit-user-select: text;
@@ -369,6 +370,45 @@
 
 .nihong-ai-model-option:hover {
 	background: var(--background-modifier-hover);
+}
+
+/* ====== epub 视图 ====== */
+
+.nihong-ai-epub-view {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 48px 24px;
+	text-align: center;
+	font-family: var(--font-text, var(--font-interface));
+}
+
+.nihong-ai-epub-view .nihong-ai-epub-title {
+	margin: 0 0 8px;
+	color: var(--text-normal);
+}
+
+.nihong-ai-epub-view .nihong-ai-epub-author {
+	color: var(--text-muted);
+	margin-bottom: 24px;
+}
+
+.nihong-ai-epub-view .nihong-ai-epub-hint {
+	color: var(--text-muted);
+	margin-bottom: 24px;
+}
+
+.nihong-ai-epub-view .nihong-ai-epub-convert-btn {
+	padding: 8px 20px;
+	border-radius: 6px;
+	cursor: pointer;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	font-size: var(--font-ui-small);
+}
+
+.nihong-ai-epub-view .nihong-ai-epub-convert-btn:hover {
+	opacity: 0.9;
 }
 
 

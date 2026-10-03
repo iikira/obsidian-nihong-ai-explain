@@ -2,6 +2,7 @@ import {
 	Notice,
 	Plugin,
 	FileSystemAdapter,
+	TFile,
 } from "obsidian";
 import {
 	DEFAULT_SETTINGS,
@@ -14,6 +15,8 @@ import { TranslateService } from "./translate/service";
 import { LRUTranslateCache } from "./translate/cache";
 import { ExplainService } from "./explain/service";
 import { LookupService } from "./dictionary/lookupService";
+import { ConverterService } from "./converter/service";
+import { EPUB_VIEW_TYPE, EpubView } from "./converter/view";
 import { DictionaryManager } from "./dictionary/manager";
 import { getSelectionRect } from "./utils";
 import {
@@ -32,6 +35,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 	private translateService: TranslateService | null = null;
 	private explainService: ExplainService | null = null;
 	private lookupService: LookupService | null = null;
+	private converterService: ConverterService | null = null;
 	dictionaryManager: DictionaryManager | null = null;
 
 	/** 暴露翻译缓存供设置页读取（显示条数 / 清空） */
@@ -71,6 +75,19 @@ export default class NihongAIExplainPlugin extends Plugin {
 			finishTask: (a, t) => this.finishTask(a, t),
 			getSelectionRect: () => getSelectionRect(),
 		});
+		this.converterService = new ConverterService({
+			getVault: () => this.app.vault,
+			tryStartTask: (a, k) => this.tryStartTask(a, k),
+			finishTask: (a, k) => this.finishTask(a, k),
+		});
+		this.registerView(
+			EPUB_VIEW_TYPE,
+			(leaf) =>
+				new EpubView(leaf, {
+					onConvert: (file) => void this.converterService?.convert(file),
+				}),
+		);
+		this.registerExtensions(["epub"], EPUB_VIEW_TYPE);
 		this.pill = new SelectionPill(this.buildPillActions());
 		this.pill.attach();
 		this.applyLexisPillDisabled();
@@ -106,6 +123,23 @@ export default class NihongAIExplainPlugin extends Plugin {
 					.onClick(() => void this.speakText(sel));
 			});
 		})
+		);
+
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				if (!(file instanceof TFile)) {
+					return;
+				}
+				if (file.extension.toLowerCase() !== "epub") {
+					return;
+				}
+				menu.addItem((item) => {
+					item
+						.setTitle("转换为 md")
+						.setIcon("document")
+						.onClick(() => void this.converterService?.convert(file));
+				});
+			})
 		);
 
 		this.addCommand({
@@ -155,6 +189,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.translateService = null;
 		this.lookupService?.onUnload();
 		this.lookupService = null;
+		this.converterService = null;
 		this.dictionaryManager = null;
 		stopSpeak();
 	}
