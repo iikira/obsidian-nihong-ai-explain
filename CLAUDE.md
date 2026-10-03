@@ -45,7 +45,8 @@ Entry point is `src/main.ts` — the `NihongAIExplainPlugin` class is a thin **o
 - **`src/dictionary/`** — offline Yomitan-format dictionary lookups stored in **IndexedDB** (DB name `nihong-ai-dict`).
   - `manager.ts` — `DictionaryManager`: imports a Yomitan `.zip` from the plugin directory (unzips with `fflate`), parsing `index.json`, `term_bank_*.json`, `tag_bank_*.json` into object stores; `lookup()` deinflects then matches on expression/reading indexes, validating deinflection rules.
   - `deinflector.ts` — `Deinflector`, BFS deinflection with bitmask rule matching (ported from Yomichan, GPLv3). Data in `data/deinflectData.ts`.
-  - `popup.ts` — `DictionaryPopup` renders results, supports cross-reference `?query=` links (relaunches a lookup, reused card position) and strips `<rt>` furigana on copy.
+  - `popup.ts` — `DictionaryPopup` renders results, supports cross-reference `?query=` links (relaunches a lookup, reused card position) and strips `<rt>` furigana on copy. Also renders pitch accent next to the header (circle-number markers `⓪①②…`) when `accents.txt` is present.
+  - `accents.ts` — `AccentDb`: loads kanjium `accents.txt` (TSV `expression\treading\tpositions`, including `(副)0,(名)3` part-of-speech-tagged variants) into an in-memory index; `lookup(expression, reading)` returns candidate pitch positions. Loaded by `DictionaryManager.loadAccents()` from the plugin dir at init time.
   - `furigana.ts` — aligns expression/reading into `<ruby>` segments.
   - `types.ts` — Yomitan raw/processed types and `ContentNode` (string | structured | array) used for rendering glossary.
 

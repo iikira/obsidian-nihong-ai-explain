@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { unzipSync } from "fflate";
 import { Notice, normalizePath, type App } from "obsidian";
 import { Deinflector } from "./deinflector";
+import { AccentDb } from "./accents";
 import type {
 	DictionaryMeta,
 	LookupResult,
@@ -36,6 +37,7 @@ export class DictionaryManager {
 	private tagCache: Map<string, ProcessedTag> = new Map();
 	private app: App | null = null;
 	private pluginDir: string | null = null;
+	private accentDb: AccentDb = new AccentDb();
 
 	constructor() {
 		this.deinflector = new Deinflector();
@@ -65,9 +67,42 @@ export class DictionaryManager {
 				},
 			});
 			await this.loadTags();
+			await this.loadAccents();
 		} catch (e) {
 			console.error("[nihong-ai] IndexedDB 初始化失败:", e);
 		}
+	}
+
+	/** 从插件目录读取 accents.txt 加载声调索引（文件不存在则跳过） */
+	private async loadAccents(): Promise<void> {
+		if (!this.app || !this.pluginDir) {
+			return;
+		}
+		const adapter = this.app.vault.adapter;
+		const path = normalizePath(`${this.pluginDir}/accents.txt`);
+		try {
+			const exists = await adapter.exists(path);
+			if (!exists) {
+				return;
+			}
+			const text = await adapter.read(path);
+			this.accentDb.load(text);
+			console.log(
+				`[nihong-ai] 声调索引已加载: ${this.accentDb.isLoaded ? "成功" : "空"}`,
+			);
+		} catch (e) {
+			console.warn("[nihong-ai] 加载 accents.txt 失败:", e);
+		}
+	}
+
+	/** 是否已加载声调数据 */
+	get hasAccents(): boolean {
+		return this.accentDb.isLoaded;
+	}
+
+	/** 查询某 expression+reading 的候选声调位置（无数据返回空数组） */
+	getAccents(expression: string, reading: string): number[] {
+		return this.accentDb.lookup(expression, reading);
 	}
 
 	get isReady(): boolean {

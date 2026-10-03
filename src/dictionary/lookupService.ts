@@ -55,6 +55,7 @@ export class LookupService {
 					(name) => manager.getTag(name),
 					(query) => this.lookupInPopup(query),
 					() => this.opts.getDictFontSize(),
+					(expression, reading) => manager.getAccents(expression, reading),
 				);
 			}
 

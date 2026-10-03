@@ -5,6 +5,21 @@ import type { LookupResult, ProcessedTag, ContentNode } from "./types";
 const CARD_CLASS = "nihong-ai-dict-popup";
 type State = "loading" | "result" | "error" | "empty";
 
+/**
+ * 把声调核位置数字转成圆圈数字标记（与 AI 讲解提示词一致：⓪①②…）。
+ * 0 → ⓪（平板型），1-20 → ①-⑳，>20 退化为带圈的数字。
+ */
+function toAccentCircle(position: number): string {
+	if (position === 0) {
+		return "⓪";
+	}
+	if (position >= 1 && position <= 20) {
+		return String.fromCodePoint(0x2460 + (position - 1)); // ①=U+2460
+	}
+	// 超过 20 的少见情况：用括号数字兜底
+	return `(${position})`;
+}
+
 export class DictionaryPopup {
 	private el: HTMLDivElement | null = null;
 	private scrollHandler = (e: Event): void => {
@@ -26,6 +41,7 @@ export class DictionaryPopup {
 		private getTag: (name: string) => ProcessedTag | undefined,
 		private onNavigate?: (query: string) => void,
 		private getFontSize?: () => number,
+		private getAccents?: (expression: string, reading: string) => number[],
 	) {}
 
 	showLoading(rect: DOMRect): void {
@@ -197,6 +213,19 @@ export class DictionaryPopup {
 				reason.textContent = ` ← ${first.deinflectionReasons.join(" ← ")}`;
 				header.appendChild(reason);
 			}
+
+			// 声调（pitch accent）：圆圈数字标记，多个候选用逗号分隔
+			const accents = this.getAccents?.(expression, reading);
+			if (accents && accents.length > 0) {
+				const accentSpan = document.createElement("span");
+				accentSpan.className = "nihong-ai-dict-accent";
+				accentSpan.textContent = accents
+					.map((p) => toAccentCircle(p))
+					.join(",");
+				accentSpan.title = "声调（数字为声调核位置）";
+				header.appendChild(accentSpan);
+			}
+
 			entryDiv.appendChild(header);
 
 			// 释义列表
