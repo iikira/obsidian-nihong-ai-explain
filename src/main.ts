@@ -67,6 +67,14 @@ export default class NihongAIExplainPlugin extends Plugin {
 			tryStartTask: (a, t) => this.tryStartTask(a, t),
 			finishTask: (a, t) => this.finishTask(a, t),
 			vault: () => this.app.vault,
+			lookup: (text) =>
+				this.dictionaryManager ? this.dictionaryManager.lookup(text) : Promise.resolve([]),
+			isDictionaryReady: () => {
+				const m = this.dictionaryManager;
+				return !!m && m.isReady;
+			},
+			getAccents: (expression, reading) =>
+				this.dictionaryManager?.getAccents(expression, reading) ?? [],
 		});
 		this.lookupService = new LookupService({
 			getManager: () => this.dictionaryManager,

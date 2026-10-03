@@ -56,10 +56,6 @@ export interface NihongAIExplainSettings {
 	ttsRate: number;
 	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
 	disableLexisPill: boolean;
-	/** MOJI Device ID（留空则查询时不带相关请求头） */
-	mojiDeviceId: string;
-	/** MOJI Token（留空则查询时不带相关请求头） */
-	mojiToken: string;
 }
 
 
@@ -85,8 +81,6 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	dictFontSize: 0,
 	ttsRate: 1.0,
 	disableLexisPill: false,
-	mojiDeviceId: "",
-	mojiToken: "",
 };
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {

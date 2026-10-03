@@ -8,13 +8,8 @@ import {
 	type ChatMessage,
 	type UsageInfo,
 } from "../shared";
-import {
-	MAX_TOOL_ROUNDS,
-	MOJI_TOOL_SCHEMA,
-	dispatchTool,
-	type ParsedToolCall,
-} from "../mojidict";
 import type { ModelGroup } from "../settings";
+import type { LookupResult } from "../dictionary/types";
 
 /** 讲解用到的设置项子集 */
 interface ExplainConfig {
@@ -22,8 +17,6 @@ interface ExplainConfig {
 	maxRetries: number;
 	retryInterval: number;
 	outputDir: string;
-	mojiDeviceId: string;
-	mojiToken: string;
 }
 
 export interface ExplainServiceOptions {
@@ -36,9 +29,15 @@ export interface ExplainServiceOptions {
 	finishTask: (actionId: string, text: string) => void;
 	/** 当前 vault */
 	vault: () => Vault;
+	/** 查离线词典（未加载/未导入时返回空数组） */
+	lookup: (text: string) => Promise<LookupResult[]>;
+	/** 离线词典是否已导入可用 */
+	isDictionaryReady: () => boolean;
+	/** 查声调（无数据返回空数组） */
+	getAccents: (expression: string, reading: string) => number[];
 }
 
-/** 讲解服务：封装流式 tool-call 循环、token 诊断与落盘编排。 */
+/** 讲解服务：封装流式调用、词典参考注入与落盘编排。 */
 export class ExplainService {
 	private readonly opts: ExplainServiceOptions;
 
@@ -46,21 +45,16 @@ export class ExplainService {
 		this.opts = opts;
 	}
 
-	/** 解析 SSE 流式响应，聚合 content / tool_calls / usage / finish_reason */
+	/** 解析 SSE 流式响应，聚合 content / usage / finish_reason */
 	private async parseStream(
 		reader: ReadableStreamDefaultReader<Uint8Array>,
 	): Promise<{
 		content: string;
-		toolCalls: ParsedToolCall[];
 		usage: UsageInfo;
 		finishReason: string | null;
 	}> {
 		const decoder = new TextDecoder();
 		const contentParts: string[] = [];
-		const toolCallsMap = new Map<
-			number,
-			{ id: string; name: string; arguments: string }
-		>();
 		let usage: UsageInfo = {
 			prompt_tokens: 0,
 			completion_tokens: 0,
@@ -118,68 +112,22 @@ export class ExplainService {
 				if (delta.content) {
 					contentParts.push(delta.content);
 				}
-				for (const tc of delta.tool_calls ?? []) {
-					const idx = tc.index ?? 0;
-					const entry =
-						toolCallsMap.get(idx) ??
-						{ id: "", name: "", arguments: "" };
-					if (tc.id) {
-						entry.id = tc.id;
-					}
-					if (tc.function?.name) {
-						entry.name = tc.function.name;
-					}
-					if (tc.function?.arguments) {
-						entry.arguments += tc.function.arguments;
-					}
-					toolCallsMap.set(idx, entry);
-				}
 			}
-		}
-
-		const toolCalls: ParsedToolCall[] = [];
-		for (const idx of [...toolCallsMap.keys()].sort((a, b) => a - b)) {
-			const entry = toolCallsMap.get(idx)!;
-			let args: Record<string, unknown> = {};
-			if (entry.arguments) {
-				try {
-					args = JSON.parse(entry.arguments) as Record<
-						string,
-						unknown
-					>;
-				} catch {
-					args = {};
-				}
-			}
-			toolCalls.push({
-				id: entry.id || `call_${idx}`,
-				name: entry.name,
-				arguments: args,
-				argumentsRaw: entry.arguments,
-			});
 		}
 
 		return {
 			content: contentParts.join(""),
-			toolCalls,
 			usage,
 			finishReason,
 		};
 	}
 
-	/** 发起一轮流式请求（带重试），返回解析后的 content/tool_calls/usage/finish */
-	private async callStreamRound(
+	/** 发起流式请求（带重试），返回解析后的 content/usage/finish */
+	private async callStream(
 		messages: ChatMessage[],
 		group: ModelGroup,
-		withTools: boolean,
-	): Promise<{
-		content: string;
-		toolCalls: ParsedToolCall[];
-		usage: UsageInfo;
-		finishReason: string | null;
-	}> {
-		const { temperature, maxRetries, retryInterval } =
-			this.opts.settings();
+	): Promise<{ content: string; usage: UsageInfo; finishReason: string | null }> {
+		const { temperature, maxRetries, retryInterval } = this.opts.settings();
 		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
@@ -195,10 +143,6 @@ export class ExplainService {
 			stream: true,
 		};
 		Object.assign(body, buildDisableThinking(group.modelId));
-		if (withTools) {
-			body["tools"] = MOJI_TOOL_SCHEMA;
-			body["tool_choice"] = "auto";
-		}
 
 		const max = Math.max(0, maxRetries);
 		let lastErr: unknown = null;
@@ -237,10 +181,10 @@ export class ExplainService {
 		throw new Error(`流式重试 ${max} 次后仍失败: ${finalMsg}`);
 	}
 
-	/** 打印单轮 token 用量诊断 */
-	private logTokenUsage(round: number, usage: UsageInfo): void {
+	/** 打印 token 用量诊断 */
+	private logTokenUsage(usage: UsageInfo): void {
 		console.log(
-			`[nihong-ai-explain] 第 ${round} 轮 token: ` +
+			`[nihong-ai-explain] token: ` +
 				`输入=${usage.prompt_tokens} ` +
 				`输出=${usage.completion_tokens} ` +
 				`思考=${usage.reasoning_tokens} ` +
@@ -248,101 +192,52 @@ export class ExplainService {
 		);
 	}
 
-	/** 打印整个讲解流程累加 token 用量 */
-	private logTokenTotal(total: UsageInfo): void {
-		console.log(
-			`[nihong-ai-explain] token 合计: ` +
-				`输入=${total.prompt_tokens} ` +
-				`输出=${total.completion_tokens} ` +
-				`思考=${total.reasoning_tokens} ` +
-				`合计=${total.prompt_tokens + total.completion_tokens}`,
-		);
-	}
-
 	/**
-	 * AI 讲解 tool-use 循环：引导模型先调 search_dictionary 查词典（须用原型），
-	 * 代码本地执行查词典并把结果回灌给模型，模型拿到结果后生成最终讲解。
+	 * 查离线词典并把结果格式化成参考文本（含声调、词性标签、释义、例句）。
+	 * 格式仿照词典弹窗的前端展示：
+	 *   漢字 | かんじ ⓪ | n
+	 *     - 释义1
+	 *     - 释义2
+	 *     例: 例句。译文
+	 * 词典未导入/未加载/查无结果时返回空字符串。
 	 */
-	private async runExplainToolLoop(
-		messages: ChatMessage[],
-		group: ModelGroup,
-		deviceId: string,
-		token: string,
-	): Promise<string> {
-		const total: UsageInfo = {
-			prompt_tokens: 0,
-			completion_tokens: 0,
-			reasoning_tokens: 0,
-		};
-
-		for (let rnd = 1; rnd <= MAX_TOOL_ROUNDS; rnd++) {
-			const { content, toolCalls, usage, finishReason } =
-				await this.callStreamRound(messages, group, true);
-			total.prompt_tokens += usage.prompt_tokens;
-			total.completion_tokens += usage.completion_tokens;
-			total.reasoning_tokens += usage.reasoning_tokens;
-			this.logTokenUsage(rnd, usage);
-
-			// 无工具调用：模型给出最终讲解
-			if (toolCalls.length === 0) {
-				console.log(
-					`[nihong-ai-explain] 第 ${rnd} 轮返回最终讲解（finish=${finishReason}）`,
-				);
-				this.logTokenTotal(total);
-				return content;
+	private async buildDictionaryReference(word: string): Promise<string> {
+		if (!this.opts.isDictionaryReady()) {
+			return "";
+		}
+		let results: LookupResult[] = [];
+		try {
+			results = await this.opts.lookup(word);
+		} catch (e) {
+			console.warn("[nihong-ai-explain] 词典查询失败:", e);
+			return "";
+		}
+		if (results.length === 0) {
+			return "";
+		}
+		const lines: string[] = [];
+		const limit = 8; // 限制条数，避免 prompt 过长
+		for (const r of results.slice(0, limit)) {
+			const accents = this.opts.getAccents(r.expression, r.reading);
+			const accentStr = accents.length
+				? " " + accents.map((p) => toAccentCircle(p)).join(",")
+				: "";
+			const tags = r.tags.length ? ` | ${r.tags.join("·")}` : "";
+			lines.push(`${r.expression} | ${r.reading}${accentStr}${tags}`);
+			// 释义与例句：从 glossary 提取
+			const { gloss, examples } = extractGlossary(r.glossary);
+			for (const g of gloss.slice(0, 4)) {
+				if (g.trim()) {
+					lines.push(`  - ${g.trim()}`);
+				}
 			}
-
-			// 有工具调用：追加 assistant 消息（带 tool_calls）+ 回灌 tool 结果
-			messages.push({
-				role: "assistant",
-				content: content || null,
-				tool_calls: toolCalls.map((tc) => ({
-					id: tc.id,
-					type: "function" as const,
-					function: {
-						name: tc.name,
-						arguments: tc.argumentsRaw,
-					},
-				})),
-			});
-
-			for (const tc of toolCalls) {
-				console.log(
-					`[nihong-ai-explain] 第 ${rnd} 轮调用工具 ${tc.name}(${JSON.stringify(tc.arguments)})`,
-				);
-				const resultStr = await dispatchTool(
-					tc.name,
-					tc.arguments,
-					deviceId,
-					token,
-				);
-				console.log(
-					`[nihong-ai-explain] 工具 ${tc.name} 返回结果:`,
-					resultStr,
-				);
-				messages.push({
-					role: "tool",
-					tool_call_id: tc.id,
-					content: resultStr,
-				});
+			for (const ex of examples.slice(0, 2)) {
+				if (ex.trim()) {
+					lines.push(`  例: ${ex.trim()}`);
+				}
 			}
 		}
-
-		// 超过最大轮数：去掉 tools 兜底强制生成
-		console.log(
-			`[nihong-ai-explain] 达到最大轮数 ${MAX_TOOL_ROUNDS}，兜底强制生成`,
-		);
-		const { content, usage } = await this.callStreamRound(
-			messages,
-			group,
-			false,
-		);
-		total.prompt_tokens += usage.prompt_tokens;
-		total.completion_tokens += usage.completion_tokens;
-		total.reasoning_tokens += usage.reasoning_tokens;
-		this.logTokenUsage(MAX_TOOL_ROUNDS + 1, usage);
-		this.logTokenTotal(total);
-		return content;
+		return lines.join("\n");
 	}
 
 	async explain(word: string): Promise<void> {
@@ -373,22 +268,31 @@ export class ExplainService {
 
 			new Notice("正在生成…");
 			const group = this.opts.getModelGroup();
-			const deviceId = cfg.mojiDeviceId ?? "";
-			const token = cfg.mojiToken ?? "";
+
+			// 查离线词典，命中则把结果作为参考拼进 user prompt
+			const dictRef = await this.buildDictionaryReference(clean);
+			let userContent: string;
+			if (dictRef) {
+				userContent =
+					`请讲解以下日语单词：${clean}\n\n` +
+					`该日语单词的词典查询结果如下，用于参考\n` +
+					"```\n" + dictRef + "\n```\n";
+			} else {
+				userContent = `请讲解以下日语单词：${clean}`;
+			}
+
+			console.log("[nihong-ai-explain] 用户提示词:\n" + userContent);
 
 			const messages: ChatMessage[] = [
 				{ role: "system", content: EXPLAIN_SYSTEM_PROMPT },
-				{ role: "user", content: `请讲解以下日语单词：${clean}` },
+				{ role: "user", content: userContent },
 			];
 
 			let content = "";
 			try {
-				content = await this.runExplainToolLoop(
-					messages,
-					group,
-					deviceId,
-					token,
-				);
+				const res = await this.callStream(messages, group);
+				content = res.content;
+				this.logTokenUsage(res.usage);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);
@@ -414,4 +318,76 @@ export class ExplainService {
 			this.opts.finishTask("explain", clean);
 		}
 	}
+}
+
+/** 把声调核位置数字转成圆圈数字标记（⓪①②…），与词典弹窗一致 */
+function toAccentCircle(position: number): string {
+	if (position === 0) {
+		return "⓪";
+	}
+	if (position >= 1 && position <= 20) {
+		return String.fromCodePoint(0x2460 + (position - 1));
+	}
+	return `(${position})`;
+}
+
+/**
+ * 从 Yomitan glossary（结构化内容）递归提取释义与例句。
+ * Jitendex 的例句在 example-sentence 块里（example-sentence-a 为日文，b 为译文）。
+ * 其余文本节点汇总为释义。
+ */
+function extractGlossary(
+	glossary: unknown,
+): { gloss: string[]; examples: string[] } {
+	const gloss: string[] = [];
+	const examples: string[] = [];
+
+	const walk = (node: unknown, inExample: boolean): void => {
+		if (node == null) {
+			return;
+		}
+		if (typeof node === "string") {
+			const t = node.trim();
+			if (t) {
+				if (inExample) {
+					examples.push(t);
+				} else {
+					gloss.push(t);
+				}
+			}
+			return;
+		}
+		if (Array.isArray(node)) {
+			for (const c of node) {
+				walk(c, inExample);
+			}
+			return;
+		}
+		if (typeof node === "object") {
+			const n = node as Record<string, unknown>;
+			// 检测例句块：data.content === "example-sentence" / "example-sentence-a"/"-b"
+			const dc = n.data as Record<string, unknown> | undefined;
+			const dcContent =
+				dc && typeof dc.content === "string" ? dc.content : "";
+			const isExample =
+				inExample ||
+				dcContent === "example-sentence" ||
+				dcContent === "example-sentence-a" ||
+				dcContent === "example-sentence-b";
+			if (typeof n.text === "string") {
+				walk(n.text, isExample);
+				return;
+			}
+			if (n.content !== undefined) {
+				walk(n.content, isExample);
+				return;
+			}
+			if (Array.isArray(n.children)) {
+				walk(n.children, isExample);
+			}
+		}
+	};
+
+	walk(glossary, false);
+	return { gloss, examples };
 }
