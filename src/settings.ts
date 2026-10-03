@@ -9,6 +9,7 @@ import {
 	requestUrl,
 } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
+import { FolderSuggest } from "./settings/folderSuggest";
 import {
 	clearTTSCache,
 	getTTSCacheSize,
@@ -111,15 +112,22 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("笔记输出目录")
 			.setDesc("笔记保存到此目录（相对 vault 根）。留空则输出到 vault 根目录。")
-			.addText((text) =>
-				text
+			.addSearch((search) => {
+				const apply = async (value: string): Promise<void> => {
+					this.plugin.settings.outputDir = value.trim();
+					await this.plugin.saveSettings();
+				};
+				search
 					.setPlaceholder("如 03-explain（留空=根目录）")
 					.setValue(this.plugin.settings.outputDir)
-					.onChange(async (value) => {
-						this.plugin.settings.outputDir = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+					.onChange((value) => void apply(value));
+				// 输入时弹出 vault 文件夹候选下拉，可过滤与点选（交互参考 lexis）
+				// 点选后 setValue 不会触发 onChange，需在 onPick 里直接保存
+				new FolderSuggest(this.app, search.inputEl, (folder) => {
+					search.setValue(folder);
+					void apply(folder);
+				});
+			});
 
 		// ====== 大模型分组管理 ======
 
