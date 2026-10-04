@@ -194,6 +194,11 @@
 	-webkit-user-select: none;
 }
 
+/* 让无 reading 的 base 不留空白 <rt>（视觉上更紧凑） */
+.nihong-ai-dict-furigana rt:empty {
+	display: none;
+}
+
 .nihong-ai-dict-reason {
 	font-size: 0.85em;
 	font-weight: normal;

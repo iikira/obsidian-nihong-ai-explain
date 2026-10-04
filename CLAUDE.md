@@ -13,9 +13,10 @@ npm install        # install deps (fflate, idb, esbuild, obsidian types)
 npm run dev        # esbuild watch mode -> dist/ (for live testing)
 npm run build      # tsc typecheck + esbuild production bundle -> dist/
 npm run typecheck  # tsc -noEmit -skipLibCheck only
+npm run test       # esbuild-compile test/*.test.ts -> test-dist/ then node --test
 ```
 
-There is no test suite. `npm run build` runs the TypeScript typecheck first, so it is the closest thing to "verify it compiles". Output goes to `dist/` (`main.js`, `manifest.json`, `styles.css`); copy that whole directory to `<vault>/.obsidian/plugins/nihong-ai-explain/` to install.
+Unit tests use Node's built-in `node:test` + `node:assert/strict` (**zero new deps**). `test/build.mjs` esbuild-compiles each `test/*.test.ts` to `test-dist/*.test.cjs` (platform=node, cjs, with `obsidian`/`electron` stubbed via an esbuild plugin and `node:*` kept external). Tests cover **pure functions only** (no DOM/network/IndexedDB): `sanitizeFileName`, `buildDisableThinking`/`CallLogger` (`src/shared.ts`), `AccentDb` (`accents.ts`), `Deinflector` (`deinflector.ts`), `getFuriganaSegments` (`furigana.ts`), `toAccentCircle`/`renderTermEntry` (`src/explain/renderTerm.ts` — extracted from `service.ts` as a pure module), and `LRUTranslateCache` (with a Map-backed `localStorage` mock in `test/helpers/mockStorage.ts`). DOM-dependent functions (`stripRuby`/`xhtmlToMarkdown`/`parseEpubStructure`) and Obsidian-API/network-streaming functions are not unit-tested (would need jsdom/stubs).
 
 ## Architecture
 

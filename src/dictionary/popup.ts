@@ -185,19 +185,20 @@ export class DictionaryPopup {
 			header.className = "nihong-ai-dict-header";
 			if (expression !== reading) {
 				const segments = getFuriganaSegments(expression, reading);
-				const ruby = document.createElement("ruby");
-				ruby.className = "nihong-ai-dict-furigana";
+				const wrapper = document.createElement("span");
+				wrapper.className = "nihong-ai-dict-furigana";
+				// 每个 segment 用独立 <ruby> 包裹：base 文本 + <rt>（有 reading 时）。
+				// 单 <ruby> 多 segment 时，<rt> 会注在其前所有 base 上方（错位），
+				// 故每 segment 独立 <ruby> 保证 base 与假名一一配对对齐。
 				for (const seg of segments) {
-					const base = document.createElement("span");
-					base.textContent = seg.text;
-					ruby.appendChild(base);
-					if (seg.reading) {
-						const rt = document.createElement("rt");
-						rt.textContent = seg.reading;
-						ruby.appendChild(rt);
-					}
+					const ruby = document.createElement("ruby");
+					ruby.appendChild(document.createTextNode(seg.text));
+					const rt = document.createElement("rt");
+					rt.textContent = seg.reading;
+					ruby.appendChild(rt);
+					wrapper.appendChild(ruby);
 				}
-				header.appendChild(ruby);
+				header.appendChild(wrapper);
 			} else {
 				const span = document.createElement("span");
 				span.className = "nihong-ai-dict-furigana";

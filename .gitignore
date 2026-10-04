@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 dist/
 *.js.map
 
+# Test build output (esbuild-compiled test files)
+test-dist/
+
