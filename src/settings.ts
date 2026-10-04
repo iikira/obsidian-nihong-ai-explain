@@ -618,8 +618,8 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		// 标题行：名称 + 删除按钮
 		const headerSetting = new Setting(host)
 			.setClass("nihong-ai-group-header")
-			.setName(g.name || `(未命名 ${g.id})`)
-			.setDesc("当前激活分组")
+			.setName("分组名")
+			.setDesc("大模型分组名")
 			.addText((text) => {
 				text.setPlaceholder("分组名称");
 				text.inputEl.classList.add("nihong-ai-group-name-input");
@@ -686,6 +686,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		// API 地址
 		new Setting(host)
 			.setName("API 地址")
+			.setDesc("大模型 OpenAI 兼容 API 地址, 后缀需带上 /v1")
 			.setClass("nihong-ai-group-field")
 			.addText((text) => {
 				text.setPlaceholder("https://api.example.com/v1");
@@ -705,7 +706,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			.setDesc("可从下拉选择端点返回的模型，也可手动输入任意模型 id。")
 			.setClass("nihong-ai-group-field nihong-ai-model-field")
 			.addText((text) => {
-				text.setPlaceholder("如 gpt-4o / hy3-free / deepseek-v4");
+				text.setPlaceholder("deepseek-flash");
 				text.inputEl.classList.add("nihong-ai-group-input");
 				text.setValue(g.modelId);
 				this.activeModelInput = text.inputEl;
@@ -735,7 +736,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			.setClass("nihong-ai-group-field")
 			.addText((text) => {
 				text.inputEl.type = "password";
-				text.setPlaceholder("留空=不发送 Authorization 头");
+				text.setPlaceholder("");
 				text.inputEl.classList.add("nihong-ai-group-input");
 				text.setValue(g.apiKey);
 				text.onChange(async (value) => {
