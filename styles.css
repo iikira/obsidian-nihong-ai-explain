@@ -296,35 +296,66 @@
 
 /* ====== 大模型分组管理 ====== */
 
-/* 标题行：紧凑 padding，名称输入框收窄 */
-.nihong-ai-group-header .setting-item-name {
-	font-weight: 600;
-}
-
-.nihong-ai-group-name-input {
-	width: 180px;
-	max-width: 40%;
-}
-
-/* 字段行（API地址/模型id/APIKey）：减少上下 padding */
+/* 字段行（标题/API地址/模型id/APIKey）：统一紧凑 padding */
+.nihong-ai-group-header,
 .nihong-ai-group-field {
 	padding-top: 6px;
 	padding-bottom: 6px;
 }
 
+.nihong-ai-group-header .setting-item-name {
+	font-weight: 600;
+}
+
+/* 字段行左侧名称列定宽，控件列占满 */
 .nihong-ai-group-field .setting-item-name {
 	min-width: 80px;
 	width: 80px;
 	flex: 0 0 auto;
 }
 
-.nihong-ai-group-field .setting-item-control {
-	flex: 1 1 auto;
+/*
+ * 容器右半边（setting-item-control）整列就是文本框：
+ * 关键：info 列（名称+描述）不能无限抢宽，否则描述过长会把 control 列压窄。
+ * - info 列设 flex: 0 1 auto + 较大 min-width，描述超长换行而非挤压 control
+ * - control 列设 flex: 1 1 60% + min-width，保证占右半边稳定宽度
+ * - input 撑满 control 列；extraButton（trash / chevron）绝对定位贴 control
+ *   右内侧，叠在 input 右侧内边距上，不再抢 input 水平宽度
+ */
+.nihong-ai-group-header .setting-item-info,
+.nihong-ai-group-field .setting-item-info {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 40%;
 }
 
+.nihong-ai-group-header .setting-item-control,
+.nihong-ai-group-field .setting-item-control {
+	flex: 1 1 60%;
+	min-width: 280px;
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.nihong-ai-group-name-input,
 .nihong-ai-group-input {
+	flex: 1 1 100%;
 	width: 100%;
 	min-width: 200px;
+	/* 右侧留出 extraButton（约 30px）的空间，避免文字被按钮遮挡 */
+	padding-right: 36px;
+	box-sizing: border-box;
+}
+
+/* extraButton 绝对贴右，叠在 input 右侧内边距区 */
+.nihong-ai-group-header .setting-item-control .setting-editor-extra-setting-button,
+.nihong-ai-model-field .setting-item-control .setting-editor-extra-setting-button {
+	position: absolute;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	flex: 0 0 auto;
 }
 
 /* 分组编辑区容器：左侧缩进强调"属于当前分组" */

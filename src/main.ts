@@ -88,14 +88,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 			tryStartTask: (a, k) => this.tryStartTask(a, k),
 			finishTask: (a, k) => this.finishTask(a, k),
 		});
-		this.registerView(
-			EPUB_VIEW_TYPE,
-			(leaf) =>
-				new EpubView(leaf, {
-					onConvert: (file) => void this.converterService?.convert(file),
-				}),
-		);
-		this.registerExtensions(["epub"], EPUB_VIEW_TYPE);
+		this.registerEpubView();
+
 		this.pill = new SelectionPill(this.buildPillActions());
 		this.pill.attach();
 		this.applyLexisPillDisabled();
@@ -212,6 +206,32 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+	}
+
+	/**
+	 * 注册 epub 视图与扩展名。
+	 * 若 .epub 已被其他插件抢先注册，registerExtensions 会静默覆盖/被覆盖而不抛错；
+	 * 仍用 try/catch 兜底任何意外，失败时仅提示用户，不影响插件其余功能。
+	 */
+	private registerEpubView(): void {
+		try {
+			this.registerView(
+				EPUB_VIEW_TYPE,
+				(leaf) =>
+					new EpubView(leaf, {
+						onConvert: (file) =>
+							void this.converterService?.convert(file),
+					}),
+			);
+			this.registerExtensions(["epub"], EPUB_VIEW_TYPE);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			new Notice(
+				`epub 视图注册失败，epub 转换功能不可用（不影响其他功能）: ${msg}`,
+				10000,
+			);
+			console.error("[nihong-ai-explain] epub 视图注册失败:", e);
+		}
 	}
 
 
