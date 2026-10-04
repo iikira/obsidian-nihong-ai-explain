@@ -1,4 +1,4 @@
-import { Notice, requestUrl } from "obsidian";
+import { Notice } from "obsidian";
 import { TranslateCard } from "./card";
 import { LRUTranslateCache } from "./cache";
 import { TRANSLATE_SYSTEM_PROMPT } from "../prompts";
@@ -6,9 +6,10 @@ import { centerRect } from "../popupUtils";
 import type { ModelGroup } from "../settings";
 import {
 	buildDisableThinking,
+	CallLogger,
 	type ChatCompletionResponse,
 	type ChatMessage,
-	type PerfRecord,
+	type UsageInfo,
 } from "../shared";
 
 /** 翻译用到的设置项子集 */
@@ -36,7 +37,6 @@ export class TranslateService {
 	private readonly opts: TranslateServiceOptions;
 	readonly cache: LRUTranslateCache;
 	private readonly card: TranslateCard;
-	private perfRecords: PerfRecord[] = [];
 
 	constructor(opts: TranslateServiceOptions) {
 		this.opts = opts;
@@ -55,38 +55,61 @@ export class TranslateService {
 		return new Promise((r) => setTimeout(r, ms));
 	}
 
-	private logPerf(rec: PerfRecord): void {
-		this.perfRecords.push(rec);
-	}
-
-	private flushPerfTable(): void {
-		const records = this.perfRecords;
-		this.perfRecords = [];
-		if (records.length === 0) {
-			return;
+	/** 解析 SSE 流式响应，聚合 content / usage */
+	private async parseStream(
+		reader: ReadableStreamDefaultReader<Uint8Array>,
+	): Promise<{ content: string; usage: UsageInfo | null }> {
+		const decoder = new TextDecoder();
+		const contentParts: string[] = [];
+		let usage: UsageInfo | null = null;
+		let buf = "";
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			buf += decoder.decode(value, { stream: true });
+			const lines = buf.split("\n");
+			buf = lines.pop() ?? "";
+			for (let line of lines) {
+				line = line.trim();
+				if (!line.startsWith("data:")) {
+					continue;
+				}
+				const chunk = line.slice(5).trim();
+				if (chunk === "[DONE]") {
+					continue;
+				}
+				let obj: ChatCompletionResponse;
+				try {
+					obj = JSON.parse(chunk) as ChatCompletionResponse;
+				} catch {
+					continue;
+				}
+				if (obj.usage) {
+					usage = extractUsage(obj);
+				}
+				const ch = obj.choices?.[0];
+				const delta = ch?.delta;
+				if (delta?.content) {
+					contentParts.push(delta.content);
+				}
+			}
 		}
-		const okCount = records.filter((r) => r.ok).length;
-		const totalMs = records.reduce((s, r) => s + r.ms, 0);
-		const last = records[records.length - 1];
-		console.groupCollapsed(
-			`[nihong-ai-explain perf] ${records.length} 次调用 · 成功 ${okCount} · 失败 ${records.length - okCount} · 累计 ${totalMs.toFixed(0)}ms · 终态 ${last.ok ? "成功" : "失败"}`,
-		);
-		console.table(records);
-		console.log(
-			`汇总: 尝试 ${records.length} 次, 总耗时 ${totalMs.toFixed(0)}ms, 平均 ${(totalMs / records.length).toFixed(0)}ms, 模型 ${last.model}, 消息数 ${last.msgCount}`,
-		);
-		console.groupEnd();
+		return { content: contentParts.join(""), usage };
 	}
 
+	/** 发起流式请求（单次，带重试在外层），返回 content + usage */
 	private async callModelOnce(
 		messages: ChatMessage[],
 		group: ModelGroup,
-		temperature?: number,
-		attempt = 1,
-	): Promise<string> {
+		temperature: number | undefined,
+		logger: CallLogger,
+	): Promise<{ content: string; usage: UsageInfo | null }> {
 		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
+			Accept: "text/event-stream",
 		};
 		if (group.apiKey) {
 			headers["Authorization"] = `Bearer ${group.apiKey}`;
@@ -95,93 +118,38 @@ export class TranslateService {
 			model: group.modelId,
 			messages,
 			temperature: temperature ?? this.opts.settings().temperature,
-			stream: false,
+			stream: true,
 		};
 		Object.assign(body, buildDisableThinking(group.modelId));
 		const t0 = performance.now();
-		let status = 0;
 		try {
-			const resp = await requestUrl({
-				url,
+			const resp = await fetch(url, {
 				method: "POST",
 				headers,
 				body: JSON.stringify(body),
-				throw: false,
 			});
-			status = resp.status;
-			const t1 = performance.now();
-			const ms = Math.round((t1 - t0) * 100) / 100;
-			const data = resp.json as ChatCompletionResponse;
-			if (resp.status < 200 || resp.status >= 300) {
-				const errMsg = data?.error?.message || `HTTP ${resp.status}`;
-				this.logPerf({
-					attempt,
-					ok: false,
-					status,
-					ms,
-					model: group.modelId,
-					msgCount: messages.length,
-					error: `HTTP ${resp.status}`,
-				});
-				throw new Error(`API 请求失败: ${errMsg}`);
-			}
-			if (!data || !data.choices || data.choices.length === 0) {
-				this.logPerf({
-					attempt,
-					ok: false,
-					status,
-					ms,
-					model: group.modelId,
-					msgCount: messages.length,
-					error: "no choices",
-				});
-				throw new Error("响应无 choices");
-			}
-			const msg = data.choices[0].message;
-			const content = msg?.content ?? "";
-			const reasoning = msg?.reasoning_content || msg?.reasoning || "";
-			if (reasoning.trim()) {
-				console.warn(
-					`[nihong-ai-explain] reasoning_content 非空 (${reasoning.length} chars)，仍按 content 输出`
+			if (!resp.ok || !resp.body) {
+				const errText = await resp.text().catch(() => "");
+				throw new Error(
+					`流式请求失败: HTTP ${resp.status} ${errText.slice(0, 200)}`,
 				);
 			}
-			if (!content.trim()) {
-				this.logPerf({
-					attempt,
-					ok: false,
-					status,
-					ms,
-					model: group.modelId,
-					msgCount: messages.length,
-					error: "empty content",
-				});
-				throw new Error("响应 message.content 为空");
+			const reader = resp.body.getReader();
+			let res: { content: string; usage: UsageInfo | null };
+			try {
+				res = await this.parseStream(reader);
+			} finally {
+				reader.releaseLock();
 			}
-			this.logPerf({
-				attempt,
-				ok: true,
-				status,
-				ms,
-				model: group.modelId,
-				msgCount: messages.length,
-				contentLen: content.length,
-			});
-			return content;
+			if (!res.content.trim()) {
+				throw new Error("响应 content 为空");
+			}
+			const ms = Math.round((performance.now() - t0) * 100) / 100;
+			logger.recordAttempt({ ok: true, ms });
+			return res;
 		} catch (e) {
 			const ms = Math.round((performance.now() - t0) * 100) / 100;
-			const err = e instanceof Error ? e.message : String(e);
-			// 仅当 status 仍为 0（异常在 await 前/中抛出且未走到上面记录分支）时补记一次
-			if (status === 0) {
-				this.logPerf({
-					attempt,
-					ok: false,
-					status: 0,
-					ms,
-					model: group.modelId,
-					msgCount: messages.length,
-					error: err,
-				});
-			}
+			logger.recordAttempt({ ok: false, ms });
 			throw e;
 		}
 	}
@@ -189,21 +157,20 @@ export class TranslateService {
 	private async callModelWithRetry(
 		messages: ChatMessage[],
 		group: ModelGroup,
-		temperature?: number,
-	): Promise<string> {
+		temperature: number | undefined,
+		logger: CallLogger,
+	): Promise<{ content: string; usage: UsageInfo | null }> {
 		const { maxRetries, retryInterval } = this.opts.settings();
 		const max = Math.max(0, maxRetries);
 		let lastErr: unknown = null;
 		for (let attempt = 1; attempt <= max; attempt++) {
 			try {
-				const result = await this.callModelOnce(
+				return await this.callModelOnce(
 					messages,
 					group,
 					temperature,
-					attempt,
+					logger,
 				);
-				this.flushPerfTable();
-				return result;
 			} catch (e) {
 				lastErr = e;
 				const msg = e instanceof Error ? e.message : String(e);
@@ -215,7 +182,6 @@ export class TranslateService {
 				}
 			}
 		}
-		this.flushPerfTable();
 		const finalMsg =
 			lastErr instanceof Error ? lastErr.message : String(lastErr);
 		throw new Error(`重试 ${max} 次后仍失败: ${finalMsg}`);
@@ -240,6 +206,8 @@ export class TranslateService {
 			const cached = this.cache.get(cacheKey);
 			if (cached != null) {
 				this.card.showResult(cached, rect);
+				// LRU 缓存命中：无 API 调用，无 token 用量
+				console.log("[nihong-ai-explain] 翻译 LRU 缓存命中，无 API 调用");
 				return;
 			}
 
@@ -253,12 +221,17 @@ export class TranslateService {
 				{ role: "user", content: clean },
 			];
 
+			const logger = new CallLogger("nihong-ai-explain");
 			try {
-				const result = await this.callModelWithRetry(
+				const { content: result, usage } = await this.callModelWithRetry(
 					messages,
 					this.opts.getModelGroup(),
 					0.3,
+					logger,
 				);
+				if (usage) {
+					logger.setUsage(usage);
+				}
 				this.cache.set(cacheKey, result);
 				const rectNow = this.opts.getSelectionRect() ?? rect;
 				this.card.showResult(result, rectNow);
@@ -267,9 +240,35 @@ export class TranslateService {
 				const rectNow = this.opts.getSelectionRect() ?? rect;
 				this.card.showError(`翻译失败: ${msg}`, rectNow);
 				console.error("[nihong-ai-explain] 翻译失败:", e);
+			} finally {
+				logger.flush();
 			}
 		} finally {
 			this.opts.finishTask("translate", clean);
 		}
 	}
+}
+
+/** 从非流式响应的 usage 提取 token 用量（含 prompt 缓存命中）；无 usage 返回 null */
+function extractUsage(data: ChatCompletionResponse): UsageInfo | null {
+	const u = data.usage;
+	if (!u) {
+		return null;
+	}
+	const completion = u.completion_tokens ?? u.output_tokens ?? 0;
+	const total = u.total_tokens ?? 0;
+	// prompt_tokens：优先显式字段，其次 total - completion 兜底
+	const prompt =
+		u.prompt_tokens ?? u.input_tokens ?? (total > completion ? total - completion : 0);
+	return {
+		prompt_tokens: prompt,
+		completion_tokens: completion,
+		reasoning_tokens:
+			u.completion_tokens_details?.reasoning_tokens ?? 0,
+		// prompt 缓存命中 token：兼容 OpenAI(prompt_tokens_details) / DeepSeek(prompt_cache_hit_tokens)
+		cached_tokens:
+			u.prompt_tokens_details?.cached_tokens ??
+			u.prompt_cache_hit_tokens ??
+			0,
+	};
 }

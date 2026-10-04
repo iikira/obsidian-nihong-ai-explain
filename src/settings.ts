@@ -1,8 +1,8 @@
 import {
 	App,
+	ButtonComponent,
 	DropdownComponent,
 	Notice,
-	Platform,
 	PluginSettingTab,
 	Setting,
 	SliderComponent,
@@ -10,6 +10,7 @@ import {
 } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 import { FolderSuggest } from "./settings/folderSuggest";
+import type { JitendexSourceInfo } from "./dictionary/manager";
 import {
 	clearTTSCache,
 	getTTSCacheSize,
@@ -402,112 +403,69 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("h3", { text: "离线词典" });
 
-		new Setting(containerEl)
-			.setName("使用方法")
-			.setDesc(
-				"请将 Yomitan 格式 zip（含 term_bank_*.json）复制到本插件目录后，点击下方「导入」。",
-			)
-			.addButton((btn) =>
-				btn
-					.setButtonText("打开插件目录")
-					.onClick(() => {
-						// 移动端：无法打开系统资源管理器，Notice 显示路径供用户复制
-						if (Platform.isMobileApp) {
-							const rel = this.plugin.getPluginDirRelative() ?? "(未知)";
-							new Notice(
-								`移动端无法直接打开目录，请用文件管理器把 zip 复制到: vault/${rel}/`,
-								12000,
-							);
-							return;
-						}
-						// 桌面端：Electron shell.openPath 打开资源管理器
-						const dir = this.plugin.getPluginDir();
-						if (!dir) {
-							new Notice("无法获取插件目录（需桌面端）");
-							return;
-						}
-						try {
-							// 动态 require 避开 esbuild 静态分析
-							const dynamicRequire = new Function(
-								"return typeof require !== 'undefined' ? require : undefined",
-							)() as ((m: string) => unknown) | undefined;
-							if (!dynamicRequire) {
-								new Notice("当前环境不支持打开目录，路径: " + dir, 10000);
-								return;
-							}
-							const fs = dynamicRequire("node:fs") as {
-								existsSync: (p: string) => boolean;
-							};
-							if (!fs.existsSync(dir)) {
-								new Notice(`插件目录不存在: ${dir}`);
-								return;
-							}
-							const electron = dynamicRequire("electron") as {
-								shell?: { openPath?: (p: string) => void };
-							};
-							const shell = electron?.shell;
-							if (shell && typeof shell.openPath === "function") {
-								void shell.openPath(dir);
-							} else {
-								new Notice("无法打开资源管理器，请手动访问: " + dir, 10000);
-							}
-						} catch (e) {
-							new Notice(
-								`打开目录失败: ${e instanceof Error ? e.message : String(e)}`,
-								8000,
-							);
-						}
-					}),
-			);
-
-		const dictStatusSetting = new Setting(containerEl)
-			.setName("词典状态")
+		// Jitendex 词典：一个按钮承担安装/更新（首次使用=安装，已安装=更新）
+		const jitendexSetting = new Setting(containerEl)
+			.setName("Jitendex 词典")
 			.setDesc("检测中…");
+		// 按钮引用：在 addButton 回调里赋值，供 refreshDictStatus 切换文案
+		let jitendexBtn: ButtonComponent | null = null;
 
-		const refreshDictStatus = async (): Promise<void> => {
+		/** 刷新 Jitendex 行：desc 显示已导入/最新版本，按钮文案随是否已安装切换 */
+		const refreshDictStatus = async (forceLatest = false): Promise<void> => {
 			const mgr = this.plugin.dictionaryManager;
 			if (!mgr || !mgr.isReady) {
-				dictStatusSetting.setDesc("词典未初始化");
+				jitendexSetting.setDesc("词典未初始化");
 				return;
 			}
-			const imported = await mgr.isImported();
-			if (!imported) {
-				dictStatusSetting.setDesc("未导入词典");
+			let info: JitendexSourceInfo | null = null;
+			try {
+				info = await mgr.getSourceInfo();
+			} catch (e) {
+				jitendexSetting.setDesc("获取词典源信息失败");
+				console.warn("[nihong-ai] 获取 Jitendex 源信息失败:", e);
 				return;
 			}
-			const dicts = await mgr.getDictionaries();
-			dictStatusSetting.setDesc(
-				`已导入 ${dicts.length} 部词典: ${dicts.map((d) => d.title).join(", ")}`,
+			jitendexSetting.setDesc(this.formatJitendexDesc(info, forceLatest));
+			// 已导入 → 「更新词典」；未导入 → 「安装词典」
+			jitendexBtn?.setButtonText(
+				info.installedRevision ? "更新词典" : "安装词典",
 			);
 		};
-		void refreshDictStatus();
 
-		new Setting(containerEl)
-			.setName("导入词典")
-			.setDesc("扫描插件目录下的 zip 文件并导入到 IndexedDB。")
-			.addButton((btn) =>
-				btn
-					.setButtonText("导入")
-					.setCta()
-					.onClick(async () => {
-						const mgr = this.plugin.dictionaryManager;
-						if (!mgr) {
-							new Notice("词典管理器未初始化");
-							return;
+		jitendexSetting.addButton((btn) => {
+			jitendexBtn = btn;
+			btn.setButtonText("安装词典")
+				.setCta()
+				.setTooltip("从 Jitendex 官方源下载并导入最新版")
+				.onClick(async () => {
+					const mgr = this.plugin.dictionaryManager;
+					if (!mgr) {
+						return;
+					}
+					const installing =
+						btn.buttonEl.textContent?.includes("安装") ?? false;
+					btn.setButtonText(installing ? "安装中…" : "更新中…").setDisabled(true);
+					try {
+						const res = await mgr.updateJitendex();
+						if (res.updated) {
+							new Notice(
+								`已${installing ? "安装" : "更新"}到 ${res.revision ?? "(未知版本)"}`,
+								5000,
+							);
+						} else {
+							new Notice(`已是最新版本: ${res.revision ?? "(未知)"}`);
 						}
-						btn.setButtonText("导入中…").setDisabled(true);
-						try {
-							await mgr.importFromPluginDir();
-							await refreshDictStatus();
-						} catch (e) {
-							const msg = e instanceof Error ? e.message : String(e);
-							new Notice(`导入失败: ${msg}`, 8000);
-							console.error("[nihong-ai] 词典导入失败:", e);
-						} finally {
-							btn.setButtonText("导入").setDisabled(false);
-						}
-					}),
-			);
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						new Notice(`${installing ? "安装" : "更新"}失败: ${msg}`, 8000);
+						console.error("[nihong-ai] Jitendex 更新失败:", e);
+					} finally {
+						btn.setDisabled(false);
+						await refreshDictStatus();
+					}
+				});
+		});
+		void refreshDictStatus();
 
 		new Setting(containerEl)
 			.setName("清空词典")
@@ -526,6 +484,34 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					await refreshDictStatus();
 				}),
 		);
+	}
+
+	/** 格式化 Jitendex 源信息为设置行描述文本 */
+	private formatJitendexDesc(
+		info: JitendexSourceInfo | null,
+		forceLatest: boolean,
+	): string {
+		if (!info) {
+			return "获取词典源信息失败";
+		}
+		const parts: string[] = [];
+		if (info.installedRevision) {
+			parts.push(`已导入: ${info.installedRevision}`);
+		} else {
+			parts.push("未导入");
+		}
+		if (info.latestRevision) {
+			if (info.hasUpdate) {
+				parts.push(`最新: ${info.latestRevision}（可更新）`);
+			} else {
+				parts.push(`最新: ${info.latestRevision}（已是最新）`);
+			}
+		} else if (forceLatest) {
+			parts.push("最新版本获取失败");
+		} else {
+			parts.push("点击右侧按钮安装/更新");
+		}
+		return parts.join("；");
 	}
 
 	/** 清空激活分组编辑容器并重新渲染当前激活分组 */

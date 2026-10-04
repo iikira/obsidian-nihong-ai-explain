@@ -1,6 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { unzipSync } from "fflate";
-import { Notice, normalizePath, type App } from "obsidian";
+import { Notice, normalizePath, requestUrl, type App } from "obsidian";
 import { Deinflector } from "./deinflector";
 import { AccentDb } from "./accents";
 import type {
@@ -30,6 +30,25 @@ interface YomitanDB extends DBSchema {
 
 const DB_NAME = "nihong-ai-dict";
 const DB_VERSION = 1;
+
+/** Jitendex 词典源常量（GitHub release：stephenmk/stephenmk.github.io） */
+const JITENDEX_DOWNLOAD_URL =
+	"https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
+const JITENDEX_RELEASES_API =
+	"https://api.github.com/repos/stephenmk/stephenmk.github.io/releases/latest";
+const JITENDEX_ZIP_NAME = "jitendex-yomitan.zip";
+
+/** Jitendex 词典源元信息（供设置页展示与更新判断） */
+export interface JitendexSourceInfo {
+	/** 已导入词典的 revision（无导入则 null） */
+	installedRevision: string | null;
+	/** GitHub 最新 release tag_name（拉取失败则 null） */
+	latestRevision: string | null;
+	/** latestRevision 非空且与 installedRevision 不同 */
+	hasUpdate: boolean;
+	/** 已导入词典标题 */
+	title: string | null;
+}
 
 export class DictionaryManager {
 	private db: IDBPDatabase<YomitanDB> | null = null;
@@ -181,8 +200,170 @@ export class DictionaryManager {
 			const msg = e instanceof Error ? e.message : String(e);
 			throw new Error(`读取 zip 失败: ${msg}`);
 		}
+		await this.importFromZipBuffer(buf);
+	}
+
+	/** 解压 zip 字节并导入 IndexedDB（供「从插件目录导入」与「下载导入」共用） */
+	async importFromZipBuffer(buf: ArrayBuffer): Promise<void> {
 		const files = unzipSync(new Uint8Array(buf));
 		await this.processZipFiles(files);
+	}
+
+	/** Jitendex zip 在插件目录下的 vault 相对路径 */
+	private jitendexZipPath(): string | null {
+		if (!this.pluginDir) {
+			return null;
+		}
+		return normalizePath(`${this.pluginDir}/${JITENDEX_ZIP_NAME}`);
+	}
+
+	/**
+	 * 下载 jitendex-yomitan.zip 到插件目录（覆盖旧 zip），返回 zip 路径。
+	 * 用 requestUrl 拉取（桌面/移动均可用，无 Node 依赖）。
+	 */
+	async downloadJitendexZip(): Promise<string> {
+		if (!this.app || !this.pluginDir) {
+			throw new Error("插件目录未配置，无法保存下载文件");
+		}
+		const adapter = this.app.vault.adapter;
+		const zipPath = this.jitendexZipPath();
+		if (!zipPath) {
+			throw new Error("插件目录未配置");
+		}
+		const resp = await requestUrl({
+			url: JITENDEX_DOWNLOAD_URL,
+			method: "GET",
+			throw: false,
+		});
+		if (resp.status < 200 || resp.status >= 300) {
+			throw new Error(`下载失败: HTTP ${resp.status}`);
+		}
+		const buf = resp.arrayBuffer;
+		if (!buf || buf.byteLength === 0) {
+			throw new Error(`下载失败: 响应体为空（HTTP ${resp.status}）`);
+		}
+		await adapter.writeBinary(zipPath, buf);
+		console.log(
+			`[nihong-ai] 已下载 Jitendex zip -> ${zipPath} (${buf.byteLength} 字节)`,
+		);
+		return zipPath;
+	}
+
+	/** GitHub releases/latest → tag_name；失败返回 null，不抛 */
+	async fetchLatestRevision(): Promise<string | null> {
+		try {
+			const resp = await requestUrl({
+				url: JITENDEX_RELEASES_API,
+				method: "GET",
+				headers: { Accept: "application/vnd.github+json" },
+				throw: false,
+			});
+			if (resp.status < 200 || resp.status >= 300) {
+				console.warn(
+					`[nihong-ai] 拉取 Jitendex 最新版本失败: HTTP ${resp.status}`,
+				);
+				return null;
+			}
+			const tag = (resp.json as { tag_name?: string }).tag_name;
+			return typeof tag === "string" && tag ? tag : null;
+		} catch (e) {
+			console.warn("[nihong-ai] 拉取 Jitendex 最新版本出错:", e);
+			return null;
+		}
+	}
+
+	/** 聚合已导入版本与最新版本信息（供设置页展示与更新判断） */
+	async getSourceInfo(): Promise<JitendexSourceInfo> {
+		let installedRevision: string | null = null;
+		let title: string | null = null;
+		try {
+			const dicts = await this.getDictionaries();
+			if (dicts.length > 0) {
+				installedRevision = dicts[0].revision ?? null;
+				title = dicts[0].title ?? null;
+			}
+		} catch {
+			// 忽略，视为未导入
+		}
+		const latestRevision = await this.fetchLatestRevision();
+		const hasUpdate =
+			latestRevision !== null &&
+			latestRevision !== installedRevision;
+		return { installedRevision, latestRevision, hasUpdate, title };
+	}
+
+	/**
+	 * 安装或更新到最新版：
+	 * 1. 拉取最新版本号；若已导入版本与之一致则跳过（已是最新）
+	 * 2. 若插件目录下的本地 zip 版本已与最新版一致，则跳过下载，直接用本地 zip 导入
+	 * 3. 否则下载最新 zip 到插件目录（覆盖旧 zip）
+	 * 4. 清空旧 IndexedDB 数据，导入新 zip
+	 * 返回 { revision, updated }：updated=false 表示已是最新未变更，updated=true 表示重新导入完成
+	 */
+	async updateJitendex(): Promise<{ revision: string | null; updated: boolean }> {
+		const latest = await this.fetchLatestRevision();
+		// 已导入版本与最新一致 → 跳过
+		if (latest) {
+			const installed = (await this.getDictionaries())[0]?.revision ?? null;
+			if (installed && installed === latest) {
+				return { revision: installed, updated: false };
+			}
+		}
+		// 选择 zip 来源：本地 zip 版本与最新一致 → 复用，跳过下载；
+		// 最新版本拉取失败但本地 zip 存在 → 退而用本地 zip；否则下载。
+		let zipPath: string | null = this.jitendexZipPath();
+		const localRev = await this.readLocalZipRevision();
+		if (latest && localRev && localRev === latest) {
+			console.log(
+				`[nihong-ai] 本地 zip 版本 ${localRev} 与最新一致，跳过下载`,
+			);
+		} else if (!latest && localRev) {
+			console.log(
+				`[nihong-ai] 最新版本拉取失败，复用本地 zip 版本 ${localRev}`,
+			);
+		} else {
+			zipPath = await this.downloadJitendexZip();
+		}
+		if (!zipPath) {
+			throw new Error("无法获取词典 zip（插件目录未配置）");
+		}
+		await this.clear();
+		const buf = await this.app!.vault.adapter.readBinary(zipPath);
+		await this.importFromZipBuffer(buf);
+		const dicts = await this.getDictionaries();
+		return { revision: dicts[0]?.revision ?? null, updated: true };
+	}
+
+	/** 读取插件目录下 jitendex-yomitan.zip 内 index.json 的 revision；无文件/解析失败返回 null */
+	async readLocalZipRevision(): Promise<string | null> {
+		if (!this.app || !this.pluginDir) {
+			return null;
+		}
+		const adapter = this.app.vault.adapter;
+		const zipPath = this.jitendexZipPath();
+		if (!zipPath) {
+			return null;
+		}
+		try {
+			if (!(await adapter.exists(zipPath))) {
+				return null;
+			}
+			const buf = await adapter.readBinary(zipPath);
+			const files = unzipSync(new Uint8Array(buf));
+			const indexKey = Object.keys(files).find((k) =>
+				k.endsWith("index.json"),
+			);
+			if (!indexKey) {
+				return null;
+			}
+			const meta = JSON.parse(
+				new TextDecoder().decode(files[indexKey]),
+			) as DictionaryMeta;
+			return meta.revision ?? null;
+		} catch (e) {
+			console.warn("[nihong-ai] 读取本地 zip 版本失败:", e);
+			return null;
+		}
 	}
 
 	private async processZipFiles(files: Record<string, Uint8Array>): Promise<void> {

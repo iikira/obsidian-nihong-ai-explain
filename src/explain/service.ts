@@ -3,6 +3,7 @@ import { EXPLAIN_SYSTEM_PROMPT } from "../prompts";
 import { ensureFolder, MAX_WORD_LEN, resolveTargetPath } from "../utils";
 import {
 	buildDisableThinking,
+	CallLogger,
 	sleep,
 	type ChatCompletionResponse,
 	type ChatMessage,
@@ -59,6 +60,7 @@ export class ExplainService {
 			prompt_tokens: 0,
 			completion_tokens: 0,
 			reasoning_tokens: 0,
+			cached_tokens: 0,
 		};
 		let finishReason: string | null = null;
 		let buf = "";
@@ -95,6 +97,11 @@ export class ExplainService {
 							u.completion_tokens ?? u.output_tokens ?? 0,
 						reasoning_tokens:
 							u.completion_tokens_details?.reasoning_tokens ?? 0,
+						// prompt 缓存命中 token：兼容 OpenAI(prompt_tokens_details) / DeepSeek(prompt_cache_hit_tokens)
+						cached_tokens:
+							u.prompt_tokens_details?.cached_tokens ??
+							u.prompt_cache_hit_tokens ??
+							0,
 					};
 				}
 				const choices = obj.choices ?? [];
@@ -126,6 +133,7 @@ export class ExplainService {
 	private async callStream(
 		messages: ChatMessage[],
 		group: ModelGroup,
+		logger: CallLogger,
 	): Promise<{ content: string; usage: UsageInfo; finishReason: string | null }> {
 		const { temperature, maxRetries, retryInterval } = this.opts.settings();
 		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
@@ -147,6 +155,7 @@ export class ExplainService {
 		const max = Math.max(0, maxRetries);
 		let lastErr: unknown = null;
 		for (let attempt = 1; attempt <= max; attempt++) {
+			const t0 = performance.now();
 			try {
 				const resp = await fetch(url, {
 					method: "POST",
@@ -161,12 +170,21 @@ export class ExplainService {
 				}
 				const reader = resp.body.getReader();
 				try {
-					return await this.parseStream(reader);
+					const res = await this.parseStream(reader);
+					logger.recordAttempt({
+						ok: true,
+						ms: performance.now() - t0,
+					});
+					return res;
 				} finally {
 					reader.releaseLock();
 				}
 			} catch (e) {
 				lastErr = e;
+				logger.recordAttempt({
+					ok: false,
+					ms: performance.now() - t0,
+				});
 				const msg = e instanceof Error ? e.message : String(e);
 				console.warn(
 					`[nihong-ai-explain] 第 ${attempt}/${max} 次流式失败: ${msg}`,
@@ -179,17 +197,6 @@ export class ExplainService {
 		const finalMsg =
 			lastErr instanceof Error ? lastErr.message : String(lastErr);
 		throw new Error(`流式重试 ${max} 次后仍失败: ${finalMsg}`);
-	}
-
-	/** 打印 token 用量诊断 */
-	private logTokenUsage(usage: UsageInfo): void {
-		console.log(
-			`[nihong-ai-explain] token: ` +
-				`输入=${usage.prompt_tokens} ` +
-				`输出=${usage.completion_tokens} ` +
-				`思考=${usage.reasoning_tokens} ` +
-				`合计=${usage.prompt_tokens + usage.completion_tokens}`,
-		);
 	}
 
 	/**
@@ -300,16 +307,19 @@ export class ExplainService {
 			];
 
 			let content = "";
+			const logger = new CallLogger("nihong-ai-explain");
 			try {
-				const res = await this.callStream(messages, group);
+				const res = await this.callStream(messages, group, logger);
 				content = res.content;
-				this.logTokenUsage(res.usage);
+				logger.setUsage(res.usage);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);
 				console.error("[nihong-ai-explain] 生成失败:", e);
+				logger.flush();
 				return;
 			}
+			logger.flush();
 
 			const dir = (cfg.outputDir ?? "").trim();
 			try {
@@ -368,7 +378,7 @@ function renderTermEntry(glossary: unknown): string[] {
 		return v.replace(/^"|"$/g, "").trim();
 	};
 
-	/** 把节点子树里的纯文本拼起来（ruby 只留 base，去 rt；去多余空格） */
+	/** 把节点子树里的纯文本拼起来（ruby 只留 base，去 rt；去多余空格；跳过脚注） */
 	const textOf = (node: unknown): string => {
 		const parts: string[] = [];
 		const walk = (n: unknown): void => {
@@ -391,6 +401,10 @@ function renderTermEntry(glossary: unknown): string[] {
 			const o = n as Record<string, unknown>;
 			// rt（振假名）整支丢弃
 			if (o.tag === "rt") {
+				return;
+			}
+			// 来源脚注（attribution-footnote，如译文末尾的 [1]）跳过
+			if (dataContent(o) === "attribution-footnote") {
 				return;
 			}
 			if (typeof o.text === "string") {
@@ -563,6 +577,40 @@ function renderTermEntry(glossary: unknown): string[] {
 		return out;
 	};
 
+	/**
+	 * 在 sense-group 子树里按文档顺序收集所有 data.content === "sense" 的节点，
+	 * 不递归进嵌套的 sense-group（保持分组边界）。
+	 * 不依赖 sense 节点的 tag（Jitendex 里可能是 li 或 div）。
+	 */
+	const collectSensesInGroup = (
+		node: Record<string, unknown>,
+	): Record<string, unknown>[] => {
+		const out: Record<string, unknown>[] = [];
+		const visit = (n: Record<string, unknown>): void => {
+			const dc = dataContent(n);
+			if (dc === "sense") {
+				out.push(n);
+				return; // sense 子树不再下钻（其内部由 renderSense 处理）
+			}
+			if (dc === "sense-group" && n !== node) {
+				return; // 不跨组
+			}
+			const content = n.content;
+			const arr = Array.isArray(content)
+				? content
+				: content != null
+					? [content]
+					: [];
+			for (const c of arr) {
+				if (typeof c === "object" && c != null) {
+					visit(c as Record<string, unknown>);
+				}
+			}
+		};
+		visit(node);
+		return out;
+	};
+
 	/** 递归遍历，处理 sense-group 与 sense */
 	const walk = (node: unknown): void => {
 		if (node == null) {
@@ -584,7 +632,7 @@ function renderTermEntry(glossary: unknown): string[] {
 		if (dc === "attribution") {
 			return;
 		}
-		// sense-group：先输出其词性标签，再遍历 sense 列表
+		// sense-group：先输出其词性标签，再遍历其中的 sense 节点
 		if (dc === "sense-group") {
 			const content = n.content;
 			const arr = Array.isArray(content)
@@ -609,20 +657,10 @@ function renderTermEntry(glossary: unknown): string[] {
 			if (groupTags.length > 0) {
 				lines.push(`  ${groupTags.join("; ")};`);
 			}
-			// 遍历 sense 列表（ol > li[sense]）
-			for (const child of arr) {
-				if (typeof child !== "object" || child == null) {
-					continue;
-				}
-				const c = child as Record<string, unknown>;
-				if (c.tag === "ol") {
-					const senses = collectTag(c, "li").filter(
-						(li) => dataContent(li) === "sense",
-					);
-					for (const s of senses) {
-						renderSense(s);
-					}
-				}
+			// 遍历 sense-group 子树里的 sense 节点（按 data.content 识别，
+			// 不依赖 tag 是 ol/li 还是 div —— Jitendex 各词的 sense 容器 tag 不固定）
+			for (const s of collectSensesInGroup(n)) {
+				renderSense(s);
 			}
 			return;
 		}
