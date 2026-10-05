@@ -33,12 +33,16 @@ export interface ModelGroup {
 export interface NihongAIExplainSettings {
 	/** 笔记输出目录，相对 vault 根，空字符串=根目录 */
 	outputDir: string;
+	/** 语法拆解输出目录，相对 vault 根，空字符串=根目录 */
+	grammarOutputDir: string;
 	/** 大模型分组列表 */
 	modelGroups: ModelGroup[];
 	/** 当前在设置页编辑的分组 id */
 	activeModelGroupId: string;
 	/** AI 讲解用的大模型分组 id */
 	explainModelGroupId: string;
+	/** 语法拆解用的大模型分组 id */
+	grammarModelGroupId: string;
 	/** 翻译用的大模型分组 id */
 	translateModelGroupId: string;
 	/** 采样温度 */
@@ -62,6 +66,7 @@ export interface NihongAIExplainSettings {
 
 export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	outputDir: "",
+	grammarOutputDir: "",
 	modelGroups: [
 		{
 			id: "default",
@@ -73,6 +78,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	],
 	activeModelGroupId: "default",
 	explainModelGroupId: "default",
+	grammarModelGroupId: "default",
 	translateModelGroupId: "default",
 	temperature: 0.7,
 	maxRetries: 3,
@@ -105,19 +111,37 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName("笔记输出目录")
-			.setDesc("笔记保存到此目录（相对 vault 根）。留空则输出到 vault 根目录。")
+			.setName("单词解析输出目录")
+			.setDesc("单词解析保存到此目录。留空则输出到根目录。")
 			.addSearch((search) => {
 				const apply = async (value: string): Promise<void> => {
 					this.plugin.settings.outputDir = value.trim();
 					await this.plugin.saveSettings();
 				};
 				search
-					.setPlaceholder("如 03-explain（留空=根目录）")
+					.setPlaceholder("单词解析")
 					.setValue(this.plugin.settings.outputDir)
 					.onChange((value) => void apply(value));
 				// 输入时弹出 vault 文件夹候选下拉，可过滤与点选（交互参考 lexis）
 				// 点选后 setValue 不会触发 onChange，需在 onPick 里直接保存
+				new FolderSuggest(this.app, search.inputEl, (folder) => {
+					search.setValue(folder);
+					void apply(folder);
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("语法拆解输出目录")
+			.setDesc("语法拆解笔记保存到此目录。留空则输出到根目录。")
+			.addSearch((search) => {
+				const apply = async (value: string): Promise<void> => {
+					this.plugin.settings.grammarOutputDir = value.trim();
+					await this.plugin.saveSettings();
+				};
+				search
+					.setPlaceholder("语法拆解")
+					.setValue(this.plugin.settings.grammarOutputDir)
+					.onChange((value) => void apply(value));
 				new FolderSuggest(this.app, search.inputEl, (folder) => {
 					search.setValue(folder);
 					void apply(folder);
@@ -223,6 +247,21 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				dropdown.setValue(this.plugin.settings.translateModelGroupId);
 				dropdown.onChange(async (value) => {
 					this.plugin.settings.translateModelGroupId = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// 语法拆解大模型
+		new Setting(containerEl)
+			.setName("语法拆解大模型")
+			.setDesc("语法拆解功能使用此分组的大模型。")
+			.addDropdown((dropdown) => {
+				for (const g of this.plugin.settings.modelGroups) {
+					dropdown.addOption(g.id, g.name || g.modelId || g.id);
+				}
+				dropdown.setValue(this.plugin.settings.grammarModelGroupId);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.grammarModelGroupId = value;
 					await this.plugin.saveSettings();
 				});
 			});
@@ -674,6 +713,9 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						}
 						if (s.explainModelGroupId === g.id) {
 							s.explainModelGroupId = fallback;
+						}
+						if (s.grammarModelGroupId === g.id) {
+							s.grammarModelGroupId = fallback;
 						}
 						if (s.translateModelGroupId === g.id) {
 							s.translateModelGroupId = fallback;

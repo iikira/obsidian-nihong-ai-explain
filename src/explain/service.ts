@@ -1,6 +1,6 @@
 import { Notice, TFile, type Vault } from "obsidian";
 import { EXPLAIN_SYSTEM_PROMPT } from "../prompts";
-import { ensureFolder, MAX_WORD_LEN, resolveTargetPath } from "../utils";
+import { ensureFolder, hasForbiddenFileNameChar, MAX_WORD_LEN, resolveTargetPath } from "../utils";
 import {
 	CallLogger,
 	callChatCompletion,
@@ -137,6 +137,13 @@ export class ExplainService {
 				new Notice(
 					`选区过长（${clean.length} 字符），已截断使用前 ${MAX_WORD_LEN} 字符`,
 				);
+			}
+			if (hasForbiddenFileNameChar(clean)) {
+				new Notice(
+					"选区含文件名非法字符（\\ / : * ? \" < > |），无法生成笔记",
+					8000,
+				);
+				return;
 			}
 
 			const vault = this.opts.vault();

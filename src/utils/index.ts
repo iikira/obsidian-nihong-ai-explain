@@ -3,6 +3,13 @@ import { normalizePath, type Vault } from "obsidian";
 /** 讲解/文件名相关常量 */
 export const MAX_WORD_LEN = 100;
 export const FORBIDDEN_NAME_CHARS = /[\\/:*?"<>|]/g;
+/** 选区是否含文件名非法字符的检测正则（无 g flag，避免 test 受 lastIndex 影响） */
+const FORBIDDEN_NAME_CHAR_TEST = /[\\/:*?"<>|]/;
+
+/** 选区是否含文件名非法字符（\ / : * ? " < > |），用于在生成前拒绝而非静默清洗 */
+export function hasForbiddenFileNameChar(text: string): boolean {
+	return FORBIDDEN_NAME_CHAR_TEST.test(text);
+}
 
 /** 清洗为合法文件名：去掉 Windows 非法字符，空白转下划线，限长 */
 export function sanitizeFileName(word: string): string {

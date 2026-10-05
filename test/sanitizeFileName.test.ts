@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeFileName, MAX_WORD_LEN } from "../src/utils/index.ts";
+import {
+	sanitizeFileName,
+	hasForbiddenFileNameChar,
+	MAX_WORD_LEN,
+} from "../src/utils/index.ts";
 
 test("sanitizeFileName：保留普通文字", () => {
 	assert.equal(sanitizeFileName("病む"), "病む");
@@ -39,4 +43,23 @@ test("sanitizeFileName：去掉非法字符后再限长", () => {
 	const result = sanitizeFileName(long);
 	assert.equal(result.length, MAX_WORD_LEN);
 	assert.ok(!result.includes("/"));
+});
+
+test("hasForbiddenFileNameChar：含非法字符返回 true", () => {
+	assert.equal(hasForbiddenFileNameChar("a/b"), true);
+	assert.equal(hasForbiddenFileNameChar("a:b"), true);
+	assert.equal(hasForbiddenFileNameChar("a*b"), true);
+	assert.equal(hasForbiddenFileNameChar('a"b'), true);
+	assert.equal(hasForbiddenFileNameChar("a<b"), true);
+	assert.equal(hasForbiddenFileNameChar("a>b"), true);
+	assert.equal(hasForbiddenFileNameChar("a|b"), true);
+	assert.equal(hasForbiddenFileNameChar("a?b"), true);
+	assert.equal(hasForbiddenFileNameChar("a\\b"), true);
+});
+
+test("hasForbiddenFileNameChar：不含非法字符返回 false", () => {
+	assert.equal(hasForbiddenFileNameChar("病む"), false);
+	assert.equal(hasForbiddenFileNameChar("hello world"), false);
+	assert.equal(hasForbiddenFileNameChar("あいうえお"), false);
+	assert.equal(hasForbiddenFileNameChar(""), false);
 });

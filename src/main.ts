@@ -14,6 +14,7 @@ import { SelectionPill, type PillAction } from "./pill";
 import { TranslateService } from "./translate/service";
 import { LRUTranslateCache } from "./translate/cache";
 import { ExplainService } from "./explain/service";
+import { GrammarService } from "./grammar/service";
 import { LookupService } from "./dictionary/lookupService";
 import { ConverterService } from "./converter/service";
 import { EPUB_VIEW_TYPE, EpubView } from "./converter/view";
@@ -34,6 +35,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 	private pill: SelectionPill | null = null;
 	private translateService: TranslateService | null = null;
 	private explainService: ExplainService | null = null;
+	private grammarService: GrammarService | null = null;
 	private lookupService: LookupService | null = null;
 	private converterService: ConverterService | null = null;
 	dictionaryManager: DictionaryManager | null = null;
@@ -76,6 +78,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			getAccents: (expression, reading) =>
 				this.dictionaryManager?.getAccents(expression, reading) ?? [],
 		});
+		this.grammarService = new GrammarService({
+			settings: () => this.settings,
+			getModelGroup: () => this.getGrammarModelGroup(),
+			tryStartTask: (a, t) => this.tryStartTask(a, t),
+			finishTask: (a, t) => this.finishTask(a, t),
+			vault: () => this.app.vault,
+		});
 		this.lookupService = new LookupService({
 			getManager: () => this.dictionaryManager,
 			getDictFontSize: () => this.settings.dictFontSize,
@@ -105,6 +114,12 @@ export default class NihongAIExplainPlugin extends Plugin {
 						.setTitle("AI 讲解此词")
 						.setIcon("sparkles")
 						.onClick(() => void this.explain(sel));
+				});
+				menu.addItem((item) => {
+					item
+						.setTitle("语法拆解此句")
+						.setIcon("puzzle")
+						.onClick(() => void this.grammar(sel));
 				});
 				menu.addItem((item) => {
 					item
@@ -171,6 +186,19 @@ export default class NihongAIExplainPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "nihong-ai-grammar-selection",
+			name: "语法拆解选中文字",
+			callback: () => {
+				const sel = window.getSelection()?.toString().trim() ?? "";
+				if (!sel) {
+					new Notice("请先选中一段文字");
+					return;
+				}
+				void this.grammar(sel);
+			},
+		});
+
+		this.addCommand({
 			id: "nihong-ai-lookup-selection",
 			name: "查词典选中文字",
 			callback: () => {
@@ -189,6 +217,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.pill = null;
 		this.translateService?.onUnload();
 		this.translateService = null;
+		this.grammarService = null;
 		this.lookupService?.onUnload();
 		this.lookupService = null;
 		this.converterService = null;
@@ -260,6 +289,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 		return this.getModelGroup(this.settings.translateModelGroupId, "翻译");
 	}
 
+	/** 语法拆解用的大模型分组 */
+	private getGrammarModelGroup(): ModelGroup {
+		return this.getModelGroup(this.settings.grammarModelGroupId, "语法拆解");
+	}
+
 	/** 朗读选区文本 */
 	speakText(text: string): void {
 		const clean = text.trim();
@@ -327,6 +361,12 @@ export default class NihongAIExplainPlugin extends Plugin {
 				handler: (text) => this.explain(text),
 			},
 			{
+				id: "grammar",
+				label: "语法拆解",
+				icon: "puzzle",
+				handler: (text) => this.grammar(text),
+			},
+			{
 				id: "translate",
 				label: "翻译",
 				icon: "languages",
@@ -353,6 +393,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			return;
 		}
 		return this.explainService.explain(word);
+	}
+
+	async grammar(text: string): Promise<void> {
+		if (!this.grammarService) {
+			return;
+		}
+		return this.grammarService.explain(text);
 	}
 
 	async translate(text: string): Promise<void> {
