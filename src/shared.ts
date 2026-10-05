@@ -1,3 +1,5 @@
+import { requestUrl } from "obsidian";
+
 /** tool_call 中的函数调用 */
 export interface ToolCall {
 	id: string;
@@ -144,4 +146,107 @@ export function buildDisableThinking(model: string): Record<string, unknown> {
 
 export function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 从响应的 usage 提取 token 用量（含 prompt 缓存命中）；无 usage 返回 null */
+export function extractUsage(data: ChatCompletionResponse): UsageInfo | null {
+	const u = data.usage;
+	if (!u) {
+		return null;
+	}
+	const completion = u.completion_tokens ?? u.output_tokens ?? 0;
+	const total = u.total_tokens ?? 0;
+	// prompt_tokens：优先显式字段，其次 total - completion 兜底
+	const prompt =
+		u.prompt_tokens ??
+		u.input_tokens ??
+		(total > completion ? total - completion : 0);
+	return {
+		prompt_tokens: prompt,
+		completion_tokens: completion,
+		reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
+		// prompt 缓存命中 token：兼容 OpenAI(prompt_tokens_details) / DeepSeek(prompt_cache_hit_tokens)
+		cached_tokens:
+			u.prompt_tokens_details?.cached_tokens ??
+			u.prompt_cache_hit_tokens ??
+			0,
+	};
+}
+
+/**
+ * 调用 OpenAI 兼容的 /chat/completions（非流式 requestUrl，无跨域限制）。
+ * 带重试；每次尝试的成败与耗时记进 logger；成功返回 content + usage（usage 可能为 null）。
+ *
+ * @param messages 消息列表
+ * @param group 模型分组（apiUrl/modelId/apiKey）
+ * @param temperature 采样温度，undefined 用 0.7
+ * @param opts 重试与日志：maxRetries/retryInterval/logger
+ */
+export async function callChatCompletion(
+	messages: ChatMessage[],
+	group: { apiUrl: string; modelId: string; apiKey: string },
+	temperature: number | undefined,
+	opts: {
+		maxRetries: number;
+		retryInterval: number;
+		logger: CallLogger;
+	},
+): Promise<{ content: string; usage: UsageInfo | null }> {
+	const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (group.apiKey) {
+		headers["Authorization"] = `Bearer ${group.apiKey}`;
+	}
+	const body: Record<string, unknown> = {
+		model: group.modelId,
+		messages,
+		temperature: temperature ?? 0.7,
+		stream: false,
+	};
+	Object.assign(body, buildDisableThinking(group.modelId));
+
+	const max = Math.max(0, opts.maxRetries);
+	const logger = opts.logger;
+	let lastErr: unknown = null;
+	for (let attempt = 1; attempt <= max; attempt++) {
+		const t0 = performance.now();
+		try {
+			const resp = await requestUrl({
+				url,
+				method: "POST",
+				headers,
+				body: JSON.stringify(body),
+				throw: false,
+			});
+			const ms = Math.round((performance.now() - t0) * 100) / 100;
+			const data = resp.json as ChatCompletionResponse;
+			if (resp.status < 200 || resp.status >= 300) {
+				const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+				throw new Error(`API 请求失败: ${errMsg}`);
+			}
+			const choice = data.choices?.[0];
+			const content = choice?.message?.content ?? "";
+			if (!content.trim()) {
+				throw new Error("响应 message.content 为空");
+			}
+			logger.recordAttempt({ ok: true, ms });
+			return { content, usage: extractUsage(data) };
+		} catch (e) {
+			lastErr = e;
+			const ms = Math.round((performance.now() - t0) * 100) / 100;
+			logger.recordAttempt({ ok: false, ms });
+			const msg = e instanceof Error ? e.message : String(e);
+			console.warn(
+				`[nihong-ai-explain] 第 ${attempt}/${max} 次调用失败: ${msg}`,
+			);
+			if (attempt < max) {
+				await sleep(opts.retryInterval);
+			}
+		}
+	}
+	const finalMsg =
+		lastErr instanceof Error ? lastErr.message : String(lastErr);
+	throw new Error(`重试 ${max} 次后仍失败: ${finalMsg}`);
 }

@@ -2,10 +2,8 @@ import { Notice, TFile, type Vault } from "obsidian";
 import { EXPLAIN_SYSTEM_PROMPT } from "../prompts";
 import { ensureFolder, MAX_WORD_LEN, resolveTargetPath } from "../utils";
 import {
-	buildDisableThinking,
 	CallLogger,
-	sleep,
-	type ChatCompletionResponse,
+	callChatCompletion,
 	type ChatMessage,
 	type UsageInfo,
 } from "../shared";
@@ -47,157 +45,21 @@ export class ExplainService {
 		this.opts = opts;
 	}
 
-	/** 解析 SSE 流式响应，聚合 content / usage / finish_reason */
-	private async parseStream(
-		reader: ReadableStreamDefaultReader<Uint8Array>,
-	): Promise<{
-		content: string;
-		usage: UsageInfo;
-		finishReason: string | null;
-	}> {
-		const decoder = new TextDecoder();
-		const contentParts: string[] = [];
-		let usage: UsageInfo = {
-			prompt_tokens: 0,
-			completion_tokens: 0,
-			reasoning_tokens: 0,
-			cached_tokens: 0,
-		};
-		let finishReason: string | null = null;
-		let buf = "";
-
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) {
-				break;
-			}
-			buf += decoder.decode(value, { stream: true });
-			const lines = buf.split("\n");
-			// 保留最后未完整的一行
-			buf = lines.pop() ?? "";
-			for (let line of lines) {
-				line = line.trim();
-				if (!line.startsWith("data:")) {
-					continue;
-				}
-				const chunk = line.slice(5).trim();
-				if (chunk === "[DONE]") {
-					break;
-				}
-				let obj: ChatCompletionResponse;
-				try {
-					obj = JSON.parse(chunk) as ChatCompletionResponse;
-				} catch {
-					continue;
-				}
-				if (obj.usage) {
-					const u = obj.usage;
-					usage = {
-						prompt_tokens: u.prompt_tokens ?? u.input_tokens ?? 0,
-						completion_tokens:
-							u.completion_tokens ?? u.output_tokens ?? 0,
-						reasoning_tokens:
-							u.completion_tokens_details?.reasoning_tokens ?? 0,
-						// prompt 缓存命中 token：兼容 OpenAI(prompt_tokens_details) / DeepSeek(prompt_cache_hit_tokens)
-						cached_tokens:
-							u.prompt_tokens_details?.cached_tokens ??
-							u.prompt_cache_hit_tokens ??
-							0,
-					};
-				}
-				const choices = obj.choices ?? [];
-				if (choices.length === 0) {
-					continue;
-				}
-				const ch = choices[0];
-				if (ch.finish_reason) {
-					finishReason = ch.finish_reason;
-				}
-				const delta = ch.delta;
-				if (!delta) {
-					continue;
-				}
-				if (delta.content) {
-					contentParts.push(delta.content);
-				}
-			}
-		}
-
-		return {
-			content: contentParts.join(""),
-			usage,
-			finishReason,
-		};
-	}
-
-	/** 发起流式请求（带重试），返回解析后的 content/usage/finish */
-	private async callStream(
+	/**
+	 * 发起大模型调用（非流式 requestUrl，无跨域限制），带重试；返回 content + usage。
+	 * 重试、耗时、成败统一记进 logger；token 用量在调用方 setUsage 后 flush。
+	 */
+	private async callModel(
 		messages: ChatMessage[],
 		group: ModelGroup,
 		logger: CallLogger,
-	): Promise<{ content: string; usage: UsageInfo; finishReason: string | null }> {
+	): Promise<{ content: string; usage: UsageInfo | null }> {
 		const { temperature, maxRetries, retryInterval } = this.opts.settings();
-		const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-			Accept: "text/event-stream",
-		};
-		if (group.apiKey) {
-			headers["Authorization"] = `Bearer ${group.apiKey}`;
-		}
-		const body: Record<string, unknown> = {
-			model: group.modelId,
-			messages,
-			temperature,
-			stream: true,
-		};
-		Object.assign(body, buildDisableThinking(group.modelId));
-
-		const max = Math.max(0, maxRetries);
-		let lastErr: unknown = null;
-		for (let attempt = 1; attempt <= max; attempt++) {
-			const t0 = performance.now();
-			try {
-				const resp = await fetch(url, {
-					method: "POST",
-					headers,
-					body: JSON.stringify(body),
-				});
-				if (!resp.ok || !resp.body) {
-					const errText = await resp.text().catch(() => "");
-					throw new Error(
-						`流式请求失败: HTTP ${resp.status} ${errText.slice(0, 200)}`,
-					);
-				}
-				const reader = resp.body.getReader();
-				try {
-					const res = await this.parseStream(reader);
-					logger.recordAttempt({
-						ok: true,
-						ms: performance.now() - t0,
-					});
-					return res;
-				} finally {
-					reader.releaseLock();
-				}
-			} catch (e) {
-				lastErr = e;
-				logger.recordAttempt({
-					ok: false,
-					ms: performance.now() - t0,
-				});
-				const msg = e instanceof Error ? e.message : String(e);
-				console.warn(
-					`[nihong-ai-explain] 第 ${attempt}/${max} 次流式失败: ${msg}`,
-				);
-				if (attempt < max) {
-					await sleep(retryInterval);
-				}
-			}
-		}
-		const finalMsg =
-			lastErr instanceof Error ? lastErr.message : String(lastErr);
-		throw new Error(`流式重试 ${max} 次后仍失败: ${finalMsg}`);
+		return callChatCompletion(messages, group, temperature, {
+			maxRetries,
+			retryInterval,
+			logger,
+		});
 	}
 
 	/**
@@ -310,9 +172,11 @@ export class ExplainService {
 			let content = "";
 			const logger = new CallLogger("nihong-ai-explain");
 			try {
-				const res = await this.callStream(messages, group, logger);
+				const res = await this.callModel(messages, group, logger);
 				content = res.content;
-				logger.setUsage(res.usage);
+				if (res.usage) {
+					logger.setUsage(res.usage);
+				}
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);

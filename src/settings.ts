@@ -22,7 +22,7 @@ export interface ModelGroup {
 	id: string;
 	/** 显示名称 */
 	name: string;
-	/** API 根地址，例如 https://opencode.ai/zen/v1 */
+	/** API 根地址 */
 	apiUrl: string;
 	/** 模型 id */
 	modelId: string;
@@ -66,8 +66,8 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 		{
 			id: "default",
 			name: "默认",
-			apiUrl: "https://opencode.ai/zen/v1",
-			modelId: "hy3-free",
+			apiUrl: "https://api.deepseek.com/v1",
+			modelId: "deepseek-flash",
 			apiKey: "",
 		},
 	],
@@ -181,7 +181,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							name: this.uniqueGroupName(
 								`分组 ${this.plugin.settings.modelGroups.length + 1}`,
 							),
-							apiUrl: "https://opencode.ai/zen/v1",
+							apiUrl: "https://api.deepseek.com/v1",
 							modelId: "",
 							apiKey: "",
 						});
