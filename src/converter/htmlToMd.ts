@@ -18,10 +18,14 @@ interface ImageCollector {
  * 把一章 XHTML 转成 Markdown。
  * 逐节点递归序列化；图片会收集进 collector，md 里用相对路径 images/<file> 引用。
  * 应先对 htmlString 调用 stripRuby() 再去掉注音，再传入本函数。
+ *
+ * linkResolver：可选，把 epub 内部链接（如 p-001.xhtml#toc-001）改写为产物 md
+ * 文件链接（如 005_p-001.md#toc-001）；返回 null 表示无法解析（保留纯文本，去链接）。
  */
 export function xhtmlToMarkdown(
 	htmlString: string,
 	collector: ImageCollector,
+	linkResolver?: (href: string) => string | null,
 ): string {
 	const doc = new DOMParser().parseFromString(htmlString, "text/html");
 	if (doc.querySelector("parsererror")) {
@@ -29,7 +33,7 @@ export function xhtmlToMarkdown(
 	}
 	const body = doc.body;
 	const parts: string[] = [];
-	serializeNode(body, parts, collector);
+	serializeNode(body, parts, collector, linkResolver);
 	// 折叠多余空行，首尾去空行
 	return normalizeMarkdown(parts.join(""));
 }
@@ -38,6 +42,7 @@ function serializeNode(
 	node: Node,
 	out: string[],
 	collector: ImageCollector,
+	linkResolver?: (href: string) => string | null,
 ): void {
 	if (node.nodeType === Node.TEXT_NODE) {
 		const text = node.textContent ?? "";
@@ -55,7 +60,7 @@ function serializeNode(
 	switch (tag) {
 		case "body":
 			for (const child of blockChildren(el)) {
-				serializeNode(child, out, collector);
+				serializeNode(child, out, collector, linkResolver);
 			}
 			return;
 		// 丢弃无意义元素
@@ -83,7 +88,7 @@ function serializeNode(
 			return;
 		}
 		case "p": {
-			const text = collectInline(el, collector);
+			const text = collectInline(el, collector, linkResolver);
 			if (text.trim()) {
 				out.push(`${text.trim()}\n\n`);
 			}
@@ -94,14 +99,14 @@ function serializeNode(
 		case "article":
 		case "main": {
 			for (const child of blockChildren(el)) {
-				serializeNode(child, out, collector);
+				serializeNode(child, out, collector, linkResolver);
 			}
 			return;
 		}
 		// 列表
 		case "ul": {
 			for (const li of childrenByName(el, "li")) {
-				out.push(`- ${collectInline(li, collector).trim()}\n`);
+				out.push(`- ${collectInline(li, collector, linkResolver).trim()}\n`);
 			}
 			out.push("\n");
 			return;
@@ -109,13 +114,13 @@ function serializeNode(
 		case "ol": {
 			let i = 1;
 			for (const li of childrenByName(el, "li")) {
-				out.push(`${i++}. ${collectInline(li, collector).trim()}\n`);
+				out.push(`${i++}. ${collectInline(li, collector, linkResolver).trim()}\n`);
 			}
 			out.push("\n");
 			return;
 		}
 		case "li": {
-			out.push(collectInline(el, collector).trim());
+			out.push(collectInline(el, collector, linkResolver).trim());
 			return;
 		}
 		case "blockquote": {
@@ -154,16 +159,45 @@ function serializeNode(
 			}
 			return;
 		}
+		// SVG <image>（epub 常见图片引用方式，用 xlink:href 或 href）
+		case "image": {
+			const src =
+				el.getAttribute("xlink:href") ??
+				el.getAttribute("href") ??
+				"";
+			const alt = el.getAttribute("alt") ?? el.getAttribute("title") ?? "";
+			// 兜底：遍历属性找含 href 的（部分解析器对 xlink 命名空间处理不同）
+			let resolvedSrc = src;
+			if (!resolvedSrc) {
+				for (const attr of Array.from(el.attributes)) {
+					if (attr.name.endsWith(":href") || attr.name === "href") {
+						resolvedSrc = attr.value;
+						break;
+					}
+				}
+			}
+			if (resolvedSrc) {
+				out.push(`![${alt || "image"}](${collector.resolve(resolvedSrc)})`);
+			}
+			return;
+		}
 		case "a": {
-			const href = el.getAttribute("href") ?? "";
-			const text = collectInline(el, collector).trim();
-			if (text) {
+			const rawHref = el.getAttribute("href") ?? "";
+			const text = collectInline(el, collector, linkResolver).trim();
+			if (!text) {
+				return;
+			}
+			const href = resolveLink(rawHref, linkResolver);
+			if (href) {
 				out.push(`[${text}](${href})`);
+			} else {
+				// 无法解析的内部链接或空 href：保留纯文本
+				out.push(text);
 			}
 			return;
 		}
 		case "table": {
-			serializeTable(el, out, collector);
+			serializeTable(el, out, collector, linkResolver);
 			return;
 		}
 		// 内联语义
@@ -179,14 +213,14 @@ function serializeNode(
 		case "small":
 		case "label": {
 			for (const child of Array.from(el.childNodes)) {
-				serializeNode(child, out, collector);
+				serializeNode(child, out, collector, linkResolver);
 			}
 			return;
 		}
 		// 未知块级：透传子节点
 		default: {
 			for (const child of Array.from(el.childNodes)) {
-				serializeNode(child, out, collector);
+				serializeNode(child, out, collector, linkResolver);
 			}
 			return;
 		}
@@ -209,19 +243,27 @@ function blockChildren(el: Element): ChildNode[] {
 }
 
 /** 收集元素内联内容（遍历其子节点，避免对元素自身再分派造成递归） */
-function collectInline(el: Element, collector: ImageCollector): string {
+function collectInline(
+	el: Element,
+	collector: ImageCollector,
+	linkResolver?: (href: string) => string | null,
+): string {
 	const parts: string[] = [];
 	for (const child of Array.from(el.childNodes)) {
-		serializeNode(child, parts, collector);
+		serializeNode(child, parts, collector, linkResolver);
 	}
 	return parts.join("");
 }
 
 /** 处理一个单元格 td/th：以 <br> 分隔多行 */
-function cellText(el: Element, collector: ImageCollector): string {
+function cellText(
+	el: Element,
+	collector: ImageCollector,
+	linkResolver?: (href: string) => string | null,
+): string {
 	const parts: string[] = [];
 	for (const child of Array.from(el.childNodes)) {
-		serializeNode(child, parts, collector);
+		serializeNode(child, parts, collector, linkResolver);
 	}
 	return parts.join(" ").replace(/\s+/g, " ").trim();
 }
@@ -231,6 +273,7 @@ function serializeTable(
 	table: Element,
 	out: string[],
 	collector: ImageCollector,
+	linkResolver?: (href: string) => string | null,
 ): void {
 	const rows: string[][] = [];
 	const headerRow: string[] | null = [];
@@ -243,7 +286,7 @@ function serializeTable(
 			if (cells.length === 0) {
 				continue;
 			}
-			const row = cells.map((c) => cellText(c, collector).replace(/\|/g, "\\|"));
+			const row = cells.map((c) => cellText(c, collector, linkResolver).replace(/\|/g, "\\|"));
 			if (tr.parentElement?.localName === "thead" && headerRow.length === 0) {
 				headerRow.push(...row);
 			} else {
@@ -298,9 +341,38 @@ function normalizeMarkdown(raw: string): string {
 		.trim();
 }
 
+/**
+ * 解析 `<a href>` 为 md 链接目标。
+ * - 外部链接（http(s)://）：原样返回
+ * - 内部 epub 链接（xxx.xhtml#anchor 或 xxx.xhtml）：交 linkResolver 改写为产物 md 文件链接
+ *   （如 p-001.xhtml#toc-001 → 005_p-001.md#toc-001）；linkResolver 返回 null → 返回 null（保留纯文本）
+ * - 空 href：返回 null
+ * 无 linkResolver 时：内部链接返回 null（无法解析），外部链接原样
+ */
+export function resolveLink(
+	href: string,
+	linkResolver?: (href: string) => string | null,
+): string | null {
+	const h = (href ?? "").trim();
+	if (!h) {
+		return null;
+	}
+	// 外部链接：原样
+	if (/^https?:\/\//i.test(h) || /^mailto:/i.test(h)) {
+		return h;
+	}
+	// 内部链接：交 resolver 改写
+	if (linkResolver) {
+		return linkResolver(h);
+	}
+	// 无 resolver：内部链接无法解析
+	return null;
+}
+
 /** 构建图片收集器：生成唯一文件名 */
 export function createImageCollector(): ImageCollector {
-	const seen = new Map<string, string>();
+	const seen = new Map<string, string>(); // src → filename
+	const usedFilenames = new Set<string>(); // 已分配的 filename，用于去重
 	const placeholders: ImagePlaceholder[] = [];
 
 	const baseName = (src: string): string => {
@@ -311,23 +383,23 @@ export function createImageCollector(): ImageCollector {
 	return {
 		placeholders,
 		resolve(src: string): string {
-			const name = baseName(src);
 			// 同源图片复用同一文件名
 			if (seen.has(src)) {
 				return `images/${seen.get(src)}`;
 			}
-			let filename = name;
+			let filename = baseName(src);
 			if (!/\.[a-z0-9]+$/i.test(filename)) {
-				filename = `${name}.png`;
+				filename = `${filename}.png`;
 			}
-			// 避免重名冲突
+			// 避免重名冲突：已分配的 filename 加 n_ 前缀
 			let unique = filename;
 			let n = 1;
-			while (seen.has(unique)) {
+			while (usedFilenames.has(unique)) {
 				unique = `${n}_${filename}`;
 				n++;
 			}
 			seen.set(src, unique);
+			usedFilenames.add(unique);
 			placeholders.push({ src, filename: unique });
 			return `images/${unique}`;
 		},
