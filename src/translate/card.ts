@@ -36,7 +36,7 @@ export class TranslateCard {
 
 	hide(): void {
 		if (this.el) {
-			this.el.style.display = "none";
+			this.el.setCssStyles({ display: "none" });
 			this.el.remove();
 			this.el = null;
 		}
@@ -49,7 +49,7 @@ export class TranslateCard {
 		}
 		const div = document.createElement("div");
 		div.className = CARD_CLASS;
-		div.style.display = "none";
+		div.setCssStyles({ display: "none" });
 		const close = document.createElement("button");
 		close.className = "nihong-ai-translate-close";
 		close.innerHTML = "&times;";
@@ -106,8 +106,7 @@ export class TranslateCard {
 			return;
 		}
 		const { top, left } = positionCard(this.el, rect);
-		this.el.style.top = `${top}px`;
-		this.el.style.left = `${left}px`;
+		this.el.setCssStyles({ top: `${top}px`, left: `${left}px` });
 	}
 
 	private attachHideListeners(): void {

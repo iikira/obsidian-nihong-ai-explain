@@ -65,13 +65,13 @@ export async function synthesizeEdge(
 	let audioReceived = false;
 
 	const timeoutPromise = new Promise<never>((_, reject) => {
-		setTimeout(() => reject(new Error(`edge-tts 合成超时（${timeoutMs}ms），可能是网络无法连接 speech.platform.bing.com`)), timeoutMs);
+		window.setTimeout(() => reject(new Error(`edge-tts 合成超时（${timeoutMs}ms），可能是网络无法连接 speech.platform.bing.com`)), timeoutMs);
 	});
 
 	const synth = (async (): Promise<ArrayBuffer> => {
 		for await (const chunk of communicate.stream()) {
 			if (chunk.type === "audio" && chunk.data) {
-				const data = chunk.data as Uint8Array;
+				const data = chunk.data;
 				if (data.length > 0) {
 					audioReceived = true;
 					// 复制一份（避免持有库内部的 buffer 引用）

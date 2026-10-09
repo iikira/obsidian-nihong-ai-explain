@@ -3,7 +3,7 @@ import { unzipSync } from "fflate";
 import { Notice, normalizePath, requestUrl, type App } from "obsidian";
 import { Deinflector } from "./deinflector";
 import { AccentDb } from "./accents";
-import { ACCENTS_TEXT } from "./data/accentsData";
+import { ACCENTS_B64_GZ } from "./data/accentsData";
 import type {
 	DictionaryMeta,
 	LookupResult,
@@ -93,13 +93,19 @@ export class DictionaryManager {
 		}
 	}
 
-	/** 用内置的 accents 文本（构建时打包进 bundle）加载声调索引 */
+	/** 用内置的 accents 文本（构建时 gzip+base64 打包进 bundle）加载声调索引 */
 	private async loadAccents(): Promise<void> {
 		try {
-			this.accentDb.load(ACCENTS_TEXT);
-			console.log(
-				`[nihong-ai] 声调索引已加载: ${this.accentDb.isLoaded ? "成功" : "空"}`,
-			);
+			// base64 解码 → gzip 解压（浏览器原生 DecompressionStream，桌面/移动端均支持）
+			const binStr = atob(ACCENTS_B64_GZ);
+			const bytes = new Uint8Array(binStr.length);
+			for (let i = 0; i < binStr.length; i++) {
+				bytes[i] = binStr.charCodeAt(i);
+			}
+			const ds = new DecompressionStream("gzip");
+			const decompressed = new Response(new Blob([bytes]).stream().pipeThrough(ds));
+			const text = await decompressed.text();
+			this.accentDb.load(text);
 		} catch (e) {
 			console.warn("[nihong-ai] 加载声调索引失败:", e);
 		}

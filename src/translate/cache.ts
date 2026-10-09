@@ -61,7 +61,7 @@ export class LRUTranslateCache {
 	clear(): void {
 		this.map.clear();
 		if (this.flushTimer != null) {
-			clearTimeout(this.flushTimer);
+			window.clearTimeout(this.flushTimer);
 			this.flushTimer = null;
 		}
 		try {
@@ -78,7 +78,7 @@ export class LRUTranslateCache {
 	/** 立即写入 localStorage（卸载时调用） */
 	flush(): void {
 		if (this.flushTimer != null) {
-			clearTimeout(this.flushTimer);
+			window.clearTimeout(this.flushTimer);
 			this.flushTimer = null;
 		}
 		this.writeNow();
@@ -86,7 +86,7 @@ export class LRUTranslateCache {
 
 	private scheduleFlush(): void {
 		if (this.flushTimer != null) {
-			clearTimeout(this.flushTimer);
+			window.clearTimeout(this.flushTimer);
 		}
 		this.flushTimer = window.setTimeout(() => {
 			this.flushTimer = null;

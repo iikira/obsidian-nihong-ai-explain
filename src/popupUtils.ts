@@ -10,7 +10,7 @@ export function positionCard(
 	rect: DOMRect
 ): { top: number; left: number } {
 	// 先显示以测量尺寸
-	cardEl.style.display = "block";
+	cardEl.setCssStyles({ display: "block" });
 	const cardRect = cardEl.getBoundingClientRect();
 	const cardW = cardRect.width;
 	const cardH = cardRect.height;

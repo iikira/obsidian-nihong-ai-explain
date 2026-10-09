@@ -145,7 +145,7 @@ export function buildDisableThinking(model: string): Record<string, unknown> {
 }
 
 export function sleep(ms: number): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
+	return new Promise((r) => window.setTimeout(r, ms));
 }
 
 /** 从响应的 usage 提取 token 用量（含 prompt 缓存命中）；无 usage 返回 null */

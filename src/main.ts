@@ -1,7 +1,6 @@
 import {
 	Notice,
 	Plugin,
-	FileSystemAdapter,
 	TFile,
 } from "obsidian";
 import {
@@ -164,7 +163,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		);
 
 		this.addCommand({
-			id: "nihong-ai-explain-selection",
+			id: "explain-selection",
 			name: "AI 讲解选中文字",
 			callback: () => {
 				const sel = window.getSelection()?.toString().trim() ?? "";
@@ -177,7 +176,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "nihong-ai-translate-selection",
+			id: "translate-selection",
 			name: "翻译选中文字",
 			callback: () => {
 				const sel = window.getSelection()?.toString().trim() ?? "";
@@ -190,7 +189,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "nihong-ai-grammar-selection",
+			id: "grammar-selection",
 			name: "语法拆解选中文字",
 			callback: () => {
 				const sel = window.getSelection()?.toString().trim() ?? "";
@@ -203,7 +202,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: "nihong-ai-lookup-selection",
+			id: "lookup-selection",
 			name: "查词典选中文字",
 			callback: () => {
 				const sel = window.getSelection()?.toString().trim() ?? "";
@@ -418,37 +417,5 @@ export default class NihongAIExplainPlugin extends Plugin {
 			return;
 		}
 		return this.lookupService.lookup(text);
-	}
-
-	/** 获取插件目录的绝对路径（vault 根 + manifest.dir），仅桌面端可用 */
-	getPluginDir(): string | null {
-		const rel = this.manifest.dir;
-		if (!rel) {
-			return null;
-		}
-		const adapter = this.app.vault.adapter;
-		if (!(adapter instanceof FileSystemAdapter)) {
-			return null;
-		}
-		// 动态 require 避开 esbuild 静态分析，移动端 Capacitor 无 require 全局
-		try {
-			const dynamicRequire = new Function(
-				"return typeof require !== 'undefined' ? require : undefined",
-			)() as ((m: string) => unknown) | undefined;
-			if (!dynamicRequire) {
-				return null;
-			}
-			const pathMod = dynamicRequire("node:path") as {
-				join: (...args: string[]) => string;
-			};
-			return pathMod.join(adapter.getBasePath(), rel);
-		} catch {
-			return null;
-		}
-	}
-
-	/** 获取插件目录的 vault 相对路径，移动端可用（用于显示给用户复制） */
-	getPluginDirRelative(): string | null {
-		return this.manifest.dir ?? null;
 	}
 }

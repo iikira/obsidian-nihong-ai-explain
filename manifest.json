@@ -2,7 +2,7 @@
 	"id": "nihong-ai-explain",
 	"name": "Nihong AI explaination",
 	"version": "0.1.0",
-	"minAppVersion": "1.4.0",
+	"minAppVersion": "1.4.10",
 	"description": "霓虹AI讲解: 选中日语单词或句子，AI 讲解生成详解笔记、语法拆解、翻译、离线查词典与朗读。Nihong AI Explanation: Select a Japanese word or sentence, and the AI generates detailed notes, grammar breakdowns, translations, offline dictionary lookups, and audio pronunciation.",
 	"author": "iikira",
 	"isDesktopOnly": false

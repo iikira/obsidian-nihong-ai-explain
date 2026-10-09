@@ -25,10 +25,12 @@ export function installMockStorage(): void {
 		},
 	};
 	(globalThis as { localStorage: unknown }).localStorage = mockLocalStorage;
-	// window.setTimeout：指向 Node 的 setTimeout
+	// window.setTimeout / window.clearTimeout：指向 Node 的对应函数
 	(globalThis as { window: Record<string, unknown> }).window = {
 		setTimeout: (...args: unknown[]) =>
 			(setTimeout as (...a: unknown[]) => unknown)(...args),
+		clearTimeout: (...args: unknown[]) =>
+			(clearTimeout as (...a: unknown[]) => unknown)(...args),
 	};
 }
 

@@ -308,7 +308,7 @@ export class SelectionPill {
 				}
 				// 仅禁用被点击按钮自身；防重入由 main 的 tryStartTask 统一处理
 				this.markBusy(btn, true);
-				Promise.resolve(action.handler(text)).finally(() => {
+				void Promise.resolve(action.handler(text)).finally(() => {
 					this.markBusy(btn, false);
 				});
 			});
@@ -324,10 +324,12 @@ export class SelectionPill {
 
 	/** 移动端把 pill 固定显示在距底端 100px、水平居中的位置 */
 	private positionFixedCenter(pill: HTMLElement): void {
-		pill.style.top = "";
-		pill.style.bottom = `${SelectionPill.MOBILE_FIXED_BOTTOM}px`;
-		pill.style.left = "50%";
-		pill.style.transform = "translateX(-50%)";
+		pill.setCssStyles({
+			top: "",
+			bottom: `${SelectionPill.MOBILE_FIXED_BOTTOM}px`,
+			left: "50%",
+			transform: "translateX(-50%)",
+		});
 	}
 
 	/** 重新定位 pill，确保不出视口；选区底部空间不足时弹到选区上方 */
@@ -338,8 +340,7 @@ export class SelectionPill {
 			this.positionFixedCenter(el);
 			return;
 		}
-		el.style.transform = "";
-		el.style.bottom = "";
+		el.setCssStyles({ transform: "", bottom: "" });
 		const sel = window.getSelection();
 		if (!sel || sel.rangeCount === 0) {
 			return;
@@ -353,7 +354,7 @@ export class SelectionPill {
 		const ph = el.offsetHeight;
 		if (pw === 0 || ph === 0) {
 			// 尚未布局，下一帧再试
-			requestAnimationFrame(() => this.repositionPill(pill));
+			window.requestAnimationFrame(() => this.repositionPill(pill));
 			return;
 		}
 		const margin = 6;
@@ -376,19 +377,16 @@ export class SelectionPill {
 				top = Math.max(margin, vh - ph - margin);
 			}
 		}
-		el.style.top = `${top}px`;
-		el.style.left = `${left}px`;
+		el.setCssStyles({ top: `${top}px`, left: `${left}px` });
 	}
 
 	private markBusy(el: HTMLElement, busy: boolean): void {
 		if (busy) {
 			el.setAttribute("data-busy", "true");
-			el.style.opacity = "0.5";
-			el.style.pointerEvents = "none";
+			el.setCssStyles({ opacity: "0.5", pointerEvents: "none" });
 		} else {
 			el.removeAttribute("data-busy");
-			el.style.opacity = "";
-			el.style.pointerEvents = "";
+			el.setCssStyles({ opacity: "", pointerEvents: "" });
 		}
 	}
 
@@ -399,7 +397,7 @@ export class SelectionPill {
 		}
 		const btns = this.fallbackEl.querySelectorAll(".nihong-ai-pill-btn");
 		btns.forEach((el) => {
-			if (el instanceof HTMLElement) {
+			if (el.instanceOf(HTMLElement)) {
 				this.markBusy(el, false);
 			}
 		});
@@ -428,13 +426,11 @@ export class SelectionPill {
 		const el = this.fallbackEl!;
 		// 移动端：固定位置（距底端 100px 居中），不跟随选区
 		if (Platform.isMobileApp) {
-			el.style.transform = "";
 			this.positionFixedCenter(el);
-			el.style.display = "inline-flex";
+			el.setCssStyles({ display: "inline-flex" });
 			return;
 		}
-		el.style.bottom = "";
-		el.style.transform = "";
+		el.setCssStyles({ bottom: "", transform: "" });
 		const gap = 6;
 		const pillW = 28 + this.actions.length * 70;
 		let top = rect.bottom + gap + window.scrollY;
@@ -446,9 +442,7 @@ export class SelectionPill {
 		if (left > maxLeft) {
 			left = maxLeft;
 		}
-		el.style.top = `${top}px`;
-		el.style.left = `${left}px`;
-		el.style.display = "inline-flex";
+		el.setCssStyles({ top: `${top}px`, left: `${left}px`, display: "inline-flex" });
 	}
 
 	private ensureFallbackEl(): void {
@@ -458,7 +452,7 @@ export class SelectionPill {
 		const div = document.createElement("div");
 		div.id = FALLBACK_PILL_ID;
 		div.className = "nihong-ai-pill";
-		div.style.display = "none";
+		div.setCssStyles({ display: "none" });
 		// 防止点击 pill 时选区收起
 		div.addEventListener("mousedown", (ev) => ev.preventDefault());
 		for (const action of this.actions) {
@@ -483,7 +477,7 @@ export class SelectionPill {
 				// 仅禁用被点击按钮自身；防重入由 main 的 tryStartTask 统一处理
 				// 不 hideFallback / currentSelection=""：保留 pill 供并行任务
 				this.markBusy(btn, true);
-				Promise.resolve(action.handler(text)).finally(() => {
+				void Promise.resolve(action.handler(text)).finally(() => {
 					this.markBusy(btn, false);
 				});
 			});
@@ -495,20 +489,20 @@ export class SelectionPill {
 
 	private hideFallback(): void {
 		if (this.fallbackEl) {
-			this.fallbackEl.style.display = "none";
+			this.fallbackEl.setCssStyles({ display: "none" });
 		}
 	}
 
 	private clearFallbackTimer(): void {
 		if (this.pendingFallbackTimer != null) {
-			clearTimeout(this.pendingFallbackTimer);
+			window.clearTimeout(this.pendingFallbackTimer);
 			this.pendingFallbackTimer = null;
 		}
 	}
 
 	private clearSelectionDebounce(): void {
 		if (this.pendingSelectionDebounce != null) {
-			clearTimeout(this.pendingSelectionDebounce);
+			window.clearTimeout(this.pendingSelectionDebounce);
 			this.pendingSelectionDebounce = null;
 		}
 	}

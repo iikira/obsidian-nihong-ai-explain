@@ -99,9 +99,9 @@ export class DictionaryPopup {
 		div.className = CARD_CLASS;
 		const fs = this.getFontSize?.() ?? 0;
 		if (fs > 0) {
-			div.style.setProperty("--nihong-ai-dict-fs", `${fs}px`);
+			div.setCssProps({ "--nihong-ai-dict-fs": `${fs}px` });
 		}
-		div.style.display = "none";
+		div.setCssStyles({ display: "none" });
 		const close = document.createElement("button");
 		close.className = "nihong-ai-dict-close";
 		close.innerHTML = "&times;";
@@ -412,8 +412,7 @@ export class DictionaryPopup {
 			return;
 		}
 		const { top, left } = positionCard(this.el, rect);
-		this.el.style.top = `${top}px`;
-		this.el.style.left = `${left}px`;
+		this.el.setCssStyles({ top: `${top}px`, left: `${left}px` });
 	}
 
 	private attachHideListeners(): void {

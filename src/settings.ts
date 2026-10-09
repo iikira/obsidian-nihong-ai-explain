@@ -200,7 +200,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 		// ====== 大模型分组管理 ======
 
-		containerEl.createEl("h3", { text: "大模型分组" });
+		new Setting(containerEl).setName("大模型分组").setHeading();
 
 		new Setting(containerEl)
 			.setName("当前分组")
@@ -403,10 +403,11 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						) {
 							this.plugin.settings.dictFontSize = n;
 							await this.plugin.saveSettings();
-							text.inputEl.style.borderColor = "";
+							text.inputEl.setCssStyles({ borderColor: "" });
 						} else {
-							text.inputEl.style.borderColor =
-								"var(--text-error)";
+							text.inputEl.setCssStyles({
+								borderColor: "var(--text-error)",
+							});
 						}
 					})
 			);
@@ -497,9 +498,11 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				// 在滑块右侧追加常驻数值 span
 				const valueSpan = document.createElement("span");
 				valueSpan.className = "nihong-ai-tts-rate-value";
-				valueSpan.style.marginLeft = "8px";
-				valueSpan.style.minWidth = "2.5em";
-				valueSpan.style.textAlign = "right";
+				valueSpan.setCssStyles({
+					marginLeft: "8px",
+					minWidth: "2.5em",
+					textAlign: "right",
+				});
 				valueSpan.setText(this.plugin.settings.ttsRate.toFixed(1));
 				slider.sliderEl.parentElement?.insertBefore(
 					valueSpan,
@@ -556,7 +559,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 	// ====== 词典管理 ======
 
-		containerEl.createEl("h3", { text: "离线词典" });
+		new Setting(containerEl).setName("离线词典").setHeading();
 
 		// Jitendex 词典：一个按钮承担安装/更新（首次使用=安装，已安装=更新）
 		const jitendexSetting = new Setting(containerEl)
@@ -734,7 +737,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 	/** 隐藏并清空当前分组的模型下拉面板 */
 	private hideModelListPanel(): void {
 		if (this.activeModelListPanel) {
-			this.activeModelListPanel.style.display = "none";
+			this.activeModelListPanel.setCssStyles({ display: "none" });
 		}
 	}
 
@@ -746,10 +749,10 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		}
 		// 面板隐藏时切换为显示；已显示则收起
 		if (panel.style.display !== "block") {
-			panel.style.display = "block";
+			panel.setCssStyles({ display: "block" });
 			void this.refreshModelList(g);
 		} else {
-			panel.style.display = "none";
+			panel.setCssStyles({ display: "none" });
 		}
 	}
 
@@ -873,7 +876,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				let panel = row?.querySelector<HTMLDivElement>(".nihong-ai-model-panel");
 				if (row && !panel) {
 					panel = row.createDiv({ cls: "nihong-ai-model-panel" });
-					panel.style.display = "none";
+					panel.setCssStyles({ display: "none" });
 					this.activeModelListPanel = panel;
 				}
 				text.onChange(async (value) => {

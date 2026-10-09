@@ -3,7 +3,7 @@ import { synthesizeEdge, formatEdgeRate } from "./edge";
 
 const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
-	/([。！？!?\.…])/,
+	/([。！？!?.…])/,
 	/([，,；;、])/,
 	/([\s])/,
 ];
@@ -71,7 +71,7 @@ function buildTTSURL(text: string): string {
 }
 
 function sleep(ms: number): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
+	return new Promise((r) => window.setTimeout(r, ms));
 }
 
 /** 缓存 key 加引擎前缀，防止 google / edge 同文本缓存串 */
@@ -234,7 +234,7 @@ export async function speakText(text: string): Promise<void> {
 		}
 
 		const audio = new Audio(blobUrl);
-		audio.style.display = "none";
+		audio.setCssStyles({ display: "none" });
 		// 语速处理：google 用 playbackRate；edge 已在 SSML 里设了 rate，这里不再叠加避免双重变速
 		audio.playbackRate = currentConfig.engine === "google" ? currentConfig.rate : 1.0;
 		currentAudio = audio;

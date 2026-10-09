@@ -78,21 +78,9 @@ Jitendex 词典源：<https://jitendex.org/pages/downloads.html>（GitHub releas
 ## 开发
 
 ```bash
-npm install        # 安装依赖（fflate, idb, esbuild, obsidian types）
+npm install        # 安装依赖
 npm run dev        # esbuild watch 模式 -> dist/
 npm run build      # tsc 类型检查 + esbuild 生产打包 -> dist/
 npm run typecheck  # 仅 tsc -noEmit -skipLibCheck
 npm run test       # esbuild 编译 test/*.test.ts -> test-dist/ 后 node --test
 ```
-
-### 单元测试
-
-用 Node 内置 `node:test` + `node:assert/strict`。`test/build.mjs` 把每个 `test/*.test.ts` 用 esbuild 编译为 `test-dist/*.test.cjs`（`obsidian`/`electron` 桩成空模块，`node:*` 保持 external）。覆盖纯函数（无 DOM/网络/IndexedDB）：
-
-- `sanitizeFileName`（文件名清洗）
-- `buildDisableThinking` / `CallLogger`（思考开关、统一调用日志）
-- `AccentDb`（声调索引解析与查询）
-- `Deinflector`（动词/形容词变形还原）
-- `getFuriganaSegments`（振假名对齐）
-- `toAccentCircle` / `renderTermEntry`（声调圆圈标记、Jitendex 释义渲染）
-- `LRUTranslateCache`（LRU 缓存，含 localStorage mock）
