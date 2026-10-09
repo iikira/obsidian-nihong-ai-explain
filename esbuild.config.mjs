@@ -123,6 +123,15 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
+		// Node 内置模块（edge-tts 代理隧道用，运行时由 Obsidian Node 环境提供）
+		"http",
+		"https",
+		"net",
+		"tls",
+		"crypto",
+		"zlib",
+		"stream",
+		"url",
 	],
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
@@ -131,13 +140,20 @@ const context = await esbuild.context({
 	minify: prod
 });
 
+/** accentsData.ts 是否已存在（避免打包阶段重复生成） */
+const accentsDataExists = existsSync(ACCENTS_DATA_PATH);
+
 if (prod) {
-	await prepareAccents();
+	if (!accentsDataExists) {
+		await prepareAccents();
+	}
 	await context.rebuild();
 	syncStaticAssets();
 	process.exit(0);
 } else {
-	await prepareAccents();
+	if (!accentsDataExists) {
+		await prepareAccents();
+	}
 	syncStaticAssets();
 	await context.watch();
 }

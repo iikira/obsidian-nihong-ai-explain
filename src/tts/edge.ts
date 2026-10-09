@@ -274,7 +274,262 @@ function rotr(x: number, n: number): number {
 }
 
 /**
+ * 读取系统/环境代理地址（桌面端）。
+ * 依次查 HTTPS_PROXY / https_proxy / HTTP_PROXY / http_proxy / ALL_PROXY / all_proxy。
+ * 非桌面端或无环境变量返回 null。
+ */
+function detectProxy(): string | null {
+	if (typeof require === "undefined") {
+		return null;
+	}
+	try {
+		const env = (
+			new Function("return typeof process !== 'undefined' ? process : undefined")() as
+				{ env: Record<string, string | undefined> } | undefined
+		)?.env;
+		if (!env) {
+			return null;
+		}
+		return (
+			env.HTTPS_PROXY || env.https_proxy ||
+			env.HTTP_PROXY || env.http_proxy ||
+			env.ALL_PROXY || env.all_proxy ||
+			null
+		);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 桌面端通过 HTTP 代理 CONNECT 隧道建立 WSS 连接合成语音。
+ * 用 Node 内置 http（建 CONNECT 隧道）+ tls（包装 TLS）+ crypto（WebSocket 帧掩码）。
+ * 移动端无 require，不调用此函数。
+ */
+function synthesizeEdgeViaProxy(
+	text: string,
+	voice: string,
+	rate: string,
+	proxyUrl: string,
+	timeoutMs: number,
+	resolve: (buf: ArrayBuffer) => void,
+	reject: (err: Error) => void,
+): void {
+	const http = require("http") as typeof import("http");
+	const tls = require("tls") as typeof import("tls");
+	const crypto = require("crypto") as typeof import("crypto");
+
+	const connectId = generateConnectId();
+	const secMsGec = generateSecMsGec();
+	const wssPath =
+		`/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}` +
+		`&ConnectionId=${connectId}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=${SEC_MS_GEC_VERSION}`;
+	const host = "speech.platform.bing.com";
+
+	let settled = false;
+	const chunks: Uint8Array[] = [];
+	let audioReceived = false;
+	const timer = setTimeout(() => {
+		if (!settled) {
+			settled = true;
+			reject(new Error(`edge-tts 代理合成超时（${timeoutMs}ms）`));
+		}
+	}, timeoutMs);
+
+	const finish = (err?: Error, buf?: ArrayBuffer): void => {
+		if (settled) {
+			return;
+		}
+		settled = true;
+		clearTimeout(timer);
+		if (err) {
+			reject(err);
+		} else if (buf) {
+			resolve(buf);
+		}
+	};
+
+	// 解析代理 URL
+	let pu: URL;
+	try {
+		pu = new URL(proxyUrl);
+	} catch (e) {
+		finish(new Error(`edge-tts 代理地址无效: ${e instanceof Error ? e.message : String(e)}`));
+		return;
+	}
+	const proxyHost = pu.hostname;
+	const proxyPort = pu.port ? Number(pu.port) : 8080;
+	const headers: Record<string, string> = { Host: `${host}:443` };
+	if (pu.username) {
+		const user = decodeURIComponent(pu.username);
+		const pass = pu.password ? decodeURIComponent(pu.password) : "";
+		headers["Proxy-Authorization"] = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
+	}
+
+	// 1. 建代理 CONNECT 隧道
+	const connectReq = http.request({
+		host: proxyHost,
+		port: proxyPort,
+		method: "CONNECT",
+		path: `${host}:443`,
+		headers,
+		timeout: timeoutMs,
+	});
+	connectReq.on("error", (e: Error) => finish(new Error(`edge-tts 代理连接失败: ${e.message}`)));
+	connectReq.on("timeout", () => finish(new Error("edge-tts 代理 CONNECT 超时")));
+	connectReq.on("connect", (_res: unknown, sock: import("net").Socket) => {
+		// 2. TLS 包装
+		const tlsSock = tls.connect({ socket: sock, servername: host }, () => {
+			// 3. WebSocket 握手
+			const wsKey = crypto.randomBytes(16).toString("base64");
+			const handshake =
+				`GET ${wssPath} HTTP/1.1\r\n` +
+				`Host: ${host}\r\n` +
+				"Upgrade: websocket\r\n" +
+				"Connection: Upgrade\r\n" +
+				`Sec-WebSocket-Key: ${wsKey}\r\n` +
+				"Sec-WebSocket-Version: 13\r\n" +
+				"Origin: chrome-extension://jdiccigimpmpgghjlcchfojbdhlfmlhi\r\n" +
+				"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0\r\n" +
+				"\r\n";
+			tlsSock.write(handshake);
+		});
+
+		let buf = Buffer.alloc(0);
+		let upgraded = false;
+
+		const parseFrames = (): void => {
+			while (buf.length >= 2) {
+				const b0 = buf[0];
+				const opcode = b0 & 0x0f;
+				const masked = (buf[1] & 0x80) !== 0;
+				let len = buf[1] & 0x7f;
+				let off = 2;
+				if (len === 126) {
+					if (buf.length < 4) return;
+					len = buf.readUInt16BE(2);
+					off = 4;
+				} else if (len === 127) {
+					if (buf.length < 10) return;
+					len = Number(buf.readBigUInt64BE(2));
+					off = 10;
+				}
+				if (masked) {
+					if (buf.length < off + 4) return;
+					off += 4;
+				}
+				if (buf.length < off + len) return;
+				let payload = buf.slice(off, off + len);
+				// 服务端帧不应 mask，但兼容处理
+				if (masked) {
+					const maskKey = buf.slice(off - 4, off);
+					payload = Buffer.from(payload.map((b, i) => b ^ maskKey[i % 4]));
+				}
+				buf = buf.slice(off + len);
+
+				if (opcode === 0x1) {
+					// text 帧
+					const textStr = payload.toString("utf8");
+					const path = parseTextFramePath(textStr);
+					if (path === "turn.end") {
+						if (!audioReceived) {
+							finish(new Error("edge-tts 代理 turn.end 但未收到音频"));
+							return;
+						}
+						const total = chunks.reduce((s, c) => s + c.length, 0);
+						const merged = new Uint8Array(total);
+						let offset = 0;
+						for (const c of chunks) {
+							merged.set(c, offset);
+							offset += c.length;
+						}
+						finish(undefined, merged.buffer);
+						return;
+					}
+				} else if (opcode === 0x2) {
+					// binary 帧
+					const ab = payload.buffer.slice(
+						payload.byteOffset,
+						payload.byteOffset + payload.byteLength,
+					) as ArrayBuffer;
+					const { path, audio } = parseBinaryFrame(ab);
+					if (path === "audio" && audio && audio.length > 0) {
+						audioReceived = true;
+						chunks.push(new Uint8Array(audio));
+					}
+				} else if (opcode === 0x8) {
+					// close 帧
+					finish(new Error("edge-tts 代理收到 close 帧"));
+					return;
+				}
+			}
+		};
+
+		tlsSock.on("data", (d: Buffer) => {
+			buf = Buffer.concat([buf, d]);
+			if (!upgraded) {
+				const idx = buf.indexOf("\r\n\r\n");
+				if (idx < 0) {
+					return;
+				}
+				const respHead = buf.slice(0, idx).toString();
+				if (!respHead.includes("101")) {
+					finish(new Error(`edge-tts 代理 WSS 握手失败:\n${respHead}`));
+					return;
+				}
+				upgraded = true;
+				buf = buf.slice(idx + 4);
+				// 4. 发 config + ssml（客户端帧必须 mask）
+				const ts = dateToString();
+				const configMsg = buildConfigMessage();
+				const ssml = buildSSML(text, voice, rate);
+				const ssmlMsg = buildSSMLMessage(connectId, ssml);
+				const sendFrame = (str: string): void => {
+					const pl = Buffer.from(str, "utf8");
+					const mask = crypto.randomBytes(4);
+					const hdr = Buffer.alloc(pl.length <= 125 ? 6 : 8);
+					hdr[0] = 0x81; // FIN + text
+					if (pl.length <= 125) {
+						hdr[1] = 0x80 | pl.length;
+					} else {
+						hdr[1] = 0x80 | 126;
+						hdr.writeUInt16BE(pl.length, 2);
+					}
+					mask.copy(hdr, hdr.length - 4);
+					const masked = Buffer.from(pl.map((b, i) => b ^ mask[i % 4]));
+					tlsSock.write(Buffer.concat([hdr, masked]));
+				};
+				sendFrame(configMsg);
+				sendFrame(ssmlMsg);
+			}
+			parseFrames();
+		});
+		tlsSock.on("error", (e: Error) => finish(new Error(`edge-tts 代理 TLS 错误: ${e.message}`)));
+		tlsSock.on("close", () => {
+			if (!settled) {
+				if (audioReceived) {
+					const total = chunks.reduce((s, c) => s + c.length, 0);
+					const merged = new Uint8Array(total);
+					let offset = 0;
+					for (const c of chunks) {
+						merged.set(c, offset);
+						offset += c.length;
+					}
+					finish(undefined, merged.buffer);
+				} else {
+					finish(new Error("edge-tts 代理连接关闭但未收到音频"));
+				}
+			}
+		});
+	});
+	connectReq.end();
+}
+
+/**
  * 合成语音：建 WebSocket 连接，发 config + ssml，收音频帧拼装成完整 mp3 的 ArrayBuffer。
+ *
+ * 桌面端若检测到环境代理（HTTP_PROXY/HTTPS_PROXY 等），走代理 CONNECT 隧道；
+ * 否则用浏览器原生 WebSocket 直连。移动端无 require，直连。
  *
  * @param text 待合成文本
  * @param voice 语音短名
@@ -290,6 +545,13 @@ export function synthesizeEdge(
 	timeoutMs = 30000,
 ): Promise<ArrayBuffer> {
 	return new Promise((resolve, reject) => {
+		// 桌面端检测到环境代理时，走代理 CONNECT 隧道（浏览器原生 WebSocket 不走系统代理）
+		const proxy = detectProxy();
+		if (proxy) {
+			console.log("[nihong-ai-explain tts] edge 走代理:", proxy.replace(/:[^:@/]+@/, ":***@"));
+			synthesizeEdgeViaProxy(text, voice, rate, proxy, timeoutMs, resolve, reject);
+			return;
+		}
 		const connectId = generateConnectId();
 		const secMsGec = generateSecMsGec();
 		const url =
@@ -395,14 +657,24 @@ export function synthesizeEdge(
 			}
 		};
 
-		ws.onerror = (): void => {
-			fail(new Error("edge-tts WebSocket 错误"));
+		ws.onerror = (ev: Event): void => {
+			// 不立即 fail：onclose 通常紧随 onerror 触发并带 code/reason，那里信息更全。
+			// 仅在此记录，留待 onclose 判定。
+			console.error("[nihong-ai-explain tts] edge-tts WebSocket onerror", {
+				readyState: ws.readyState,
+				url,
+			}, ev);
 		};
 
 		ws.onclose = (ev: CloseEvent): void => {
 			if (!settled) {
 				if (!audioReceived) {
-					fail(new Error(`edge-tts 连接关闭但未收到音频（code=${ev.code}）`));
+					// onerror 先触发但未 fail 时，由 onclose 携带 code/reason 统一报错
+					const reason = ev.reason ? `（${ev.reason}）` : "";
+					fail(new Error(
+						`edge-tts 连接关闭但未收到音频（code=${ev.code}${reason}）` +
+						`——可能是网络/代理拦截了 WSS，或 Sec-MS-GEC 被拒绝`,
+					));
 				} else {
 					// 连接关闭但已收到音频，按完成处理
 					const total = chunks.reduce((s, c) => s + c.length, 0);
