@@ -6,8 +6,9 @@
 	"type": "commonjs",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"typecheck": "tsc -noEmit -skipLibCheck",
+		"prepare-accents": "node esbuild.config.mjs --prepare-accents",
+		"build": "npm run prepare-accents && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"typecheck": "npm run prepare-accents && tsc -noEmit -skipLibCheck",
 		"test": "node test/build.mjs && node --test test-dist/*.test.cjs"
 	},
 	"keywords": [

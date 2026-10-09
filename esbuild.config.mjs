@@ -10,6 +10,8 @@ Source files are in the "src" directory.
 `;
 
 const prod = (process.argv[2] === "production");
+/** 仅生成 accentsData.ts 不打包（供 typecheck/build 前准备依赖） */
+const prepareOnly = process.argv.includes("--prepare-accents");
 
 const STATIC_ASSETS = ["manifest.json", "styles.css"];
 
@@ -92,6 +94,12 @@ if (prod) {
 async function prepareAccents() {
 	await downloadAccents();
 	writeAccentsDataModule();
+}
+
+// 仅准备 accentsData.ts（typecheck/build 前调用，避免 tsc 因缺失模块报错）后退出
+if (prepareOnly) {
+	await prepareAccents();
+	process.exit(0);
 }
 
 const context = await esbuild.context({
