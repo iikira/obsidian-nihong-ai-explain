@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-nihong-ai-explain",
-	"version": "0.1.0",
+	"version": "0.1.2",
 	"description": "Select a Japanese word or sentence, and the AI generates detailed notes, grammar breakdowns, translations, offline dictionary lookups, and audio pronunciation.",
 	"main": "main.js",
 	"type": "commonjs",
