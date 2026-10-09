@@ -146,6 +146,10 @@ vite.config.ts.timestamp-*
 dist/
 *.js.map
 
+# 构建时下载的 kanjium accents.txt 缓存与生成的字面量模块（不提交）
+.cache/
+src/dictionary/data/accentsData.ts
+
 # Test build output (esbuild-compiled test files)
 test-dist/
 

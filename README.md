@@ -51,7 +51,7 @@ npm run build
 
 Jitendex 词典源：<https://jitendex.org/pages/downloads.html>（GitHub release：`stephenmk/stephenmk.github.io`）。
 
-声调数据来自 kanjium `accents.txt`（构建时自动下载到 `dist/`）。
+声调数据来自 kanjium `accents.txt` <https://raw.githubusercontent.com/mifunetoshiro/kanjium/master/data/source_files/raw/accents.txt>。
 
 ## 使用
 

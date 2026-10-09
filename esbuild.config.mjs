@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import { cpSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { get } from "node:https";
 
 const banner = `/*
@@ -15,7 +15,10 @@ const STATIC_ASSETS = ["manifest.json", "styles.css"];
 
 const ACCENTS_URL =
 	"https://raw.githubusercontent.com/mifunetoshiro/kanjium/master/data/source_files/raw/accents.txt";
-const ACCENTS_PATH = "dist/accents.txt";
+/** accents.txt 本地缓存（离线构建复用，gitignore） */
+const ACCENTS_CACHE_PATH = ".cache/accents.txt";
+/** 构建生成的字面量模块（供 bundle 引入，gitignore） */
+const ACCENTS_DATA_PATH = "src/dictionary/data/accentsData.ts";
 
 function syncStaticAssets() {
 	mkdirSync("dist", { recursive: true });
@@ -24,18 +27,22 @@ function syncStaticAssets() {
 	}
 }
 
-/** 下载 kanjium accents.txt 到 dist/accents.txt（已存在则跳过，离线可手动放入） */
+/**
+ * 下载 kanjium accents.txt 到 .cache/accents.txt（已存在则跳过，离线可手动放入）。
+ * 返回 accents.txt 全文（读自缓存或本次下载）。
+ */
 function downloadAccents() {
 	return new Promise((resolve) => {
-		if (existsSync(ACCENTS_PATH)) {
-			console.log(`[build] ${ACCENTS_PATH} 已存在，跳过下载`);
+		mkdirSync(".cache", { recursive: true });
+		if (existsSync(ACCENTS_CACHE_PATH)) {
+			console.log(`[build] ${ACCENTS_CACHE_PATH} 已存在，跳过下载`);
 			resolve();
 			return;
 		}
 		const req = get(ACCENTS_URL, (res) => {
 			if (res.statusCode !== 200) {
 				console.warn(
-					`[build] 下载 accents.txt 失败: HTTP ${res.statusCode}（可手动放入 dist/accents.txt）`,
+					`[build] 下载 accents.txt 失败: HTTP ${res.statusCode}（可手动放入 ${ACCENTS_CACHE_PATH}）`,
 				);
 				resolve();
 				return;
@@ -43,17 +50,34 @@ function downloadAccents() {
 			const chunks = [];
 			res.on("data", (c) => chunks.push(c));
 			res.on("end", () => {
-				writeFileSync(ACCENTS_PATH, Buffer.concat(chunks));
-				console.log(`[build] 已下载 accents.txt -> ${ACCENTS_PATH}`);
+				writeFileSync(ACCENTS_CACHE_PATH, Buffer.concat(chunks));
+				console.log(`[build] 已下载 accents.txt -> ${ACCENTS_CACHE_PATH}`);
 				resolve();
 			});
 		});
 		req.on("error", (e) => {
-			console.warn(`[build] 下载 accents.txt 出错: ${e.message}（可手动放入 dist/accents.txt）`);
+			console.warn(`[build] 下载 accents.txt 出错: ${e.message}（可手动放入 ${ACCENTS_CACHE_PATH}）`);
 			resolve();
 		});
 		req.end();
 	});
+}
+
+/**
+ * 把 .cache/accents.txt 全文转成字符串字面量模块 src/dictionary/data/accentsData.ts，
+ * 供 bundle 以 import 引入（运行时无需读插件目录文件，桌面/移动端均可用）。
+ * 文件缺失时写入空串，声调功能静默降级。
+ */
+function writeAccentsDataModule() {
+	let text = "";
+	if (existsSync(ACCENTS_CACHE_PATH)) {
+		text = readFileSync(ACCENTS_CACHE_PATH, "utf8");
+	} else {
+		console.warn(`[build] ${ACCENTS_CACHE_PATH} 不存在，生成空 accents 数据模块`);
+	}
+	// JSON.stringify 已转义所有特殊字符（换行、引号、反斜杠），安全嵌入 JS 字符串字面量
+	writeFileSync(ACCENTS_DATA_PATH, `export const ACCENTS_TEXT = ${JSON.stringify(text)};\n`);
+	console.log(`[build] 已生成 accents 数据模块 -> ${ACCENTS_DATA_PATH} (${text.length} 字符)`);
 }
 
 function cleanDist() {
@@ -62,6 +86,12 @@ function cleanDist() {
 
 if (prod) {
 	cleanDist();
+}
+
+/** 下载 accents.txt 并生成 accentsData.ts（bundle 需 import，必须在 rebuild 前完成） */
+async function prepareAccents() {
+	await downloadAccents();
+	writeAccentsDataModule();
 }
 
 const context = await esbuild.context({
@@ -94,11 +124,12 @@ const context = await esbuild.context({
 });
 
 if (prod) {
+	await prepareAccents();
 	await context.rebuild();
 	syncStaticAssets();
-	await downloadAccents();
 	process.exit(0);
 } else {
+	await prepareAccents();
 	syncStaticAssets();
 	await context.watch();
 }

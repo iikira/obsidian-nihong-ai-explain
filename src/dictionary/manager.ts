@@ -3,6 +3,7 @@ import { unzipSync } from "fflate";
 import { Notice, normalizePath, requestUrl, type App } from "obsidian";
 import { Deinflector } from "./deinflector";
 import { AccentDb } from "./accents";
+import { ACCENTS_TEXT } from "./data/accentsData";
 import type {
 	DictionaryMeta,
 	LookupResult,
@@ -92,25 +93,15 @@ export class DictionaryManager {
 		}
 	}
 
-	/** 从插件目录读取 accents.txt 加载声调索引（文件不存在则跳过） */
+	/** 用内置的 accents 文本（构建时打包进 bundle）加载声调索引 */
 	private async loadAccents(): Promise<void> {
-		if (!this.app || !this.pluginDir) {
-			return;
-		}
-		const adapter = this.app.vault.adapter;
-		const path = normalizePath(`${this.pluginDir}/accents.txt`);
 		try {
-			const exists = await adapter.exists(path);
-			if (!exists) {
-				return;
-			}
-			const text = await adapter.read(path);
-			this.accentDb.load(text);
+			this.accentDb.load(ACCENTS_TEXT);
 			console.log(
 				`[nihong-ai] 声调索引已加载: ${this.accentDb.isLoaded ? "成功" : "空"}`,
 			);
 		} catch (e) {
-			console.warn("[nihong-ai] 加载 accents.txt 失败:", e);
+			console.warn("[nihong-ai] 加载声调索引失败:", e);
 		}
 	}
 
