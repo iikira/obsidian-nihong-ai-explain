@@ -1,4 +1,5 @@
 import { Notice, requestUrl } from "obsidian";
+import { synthesizeEdge, formatEdgeRate } from "./edge";
 
 const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
@@ -15,9 +16,22 @@ const TTS_HEADERS = {
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
 
+/** TTS 引擎类型 */
+export type TtsEngine = "google" | "edge";
+
+/** TTS 配置：引擎、语音（edge 用）、语速（1.0=正常） */
+export interface TtsConfig {
+	engine: TtsEngine;
+	/** edge 引擎的语音短名（如 ja-JP-NanamiNeural）；google 忽略 */
+	voice: string;
+	/** 朗读语速倍率（0.5–3.0，1.0=正常） */
+	rate: number;
+}
+
 let currentAudio: HTMLAudioElement | null = null;
 let currentToken = 0;
-let currentRate = 1.0;
+/** 当前 TTS 配置（引擎/语音/语速） */
+let currentConfig: TtsConfig = { engine: "google", voice: "", rate: 1.0 };
 const ttsCache = new Map<string, string>();
 
 function splitForTTS(text: string): string[] {
@@ -60,21 +74,28 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
+/** 缓存 key 加引擎前缀，防止 google / edge 同文本缓存串 */
+function cacheKey(text: string): string {
+	return `${currentConfig.engine}::${text}`;
+}
+
 function getCache(text: string): string | null {
-	const url = ttsCache.get(text);
+	const k = cacheKey(text);
+	const url = ttsCache.get(k);
 	if (url === undefined) {
 		return null;
 	}
-	ttsCache.delete(text);
-	ttsCache.set(text, url);
+	ttsCache.delete(k);
+	ttsCache.set(k, url);
 	return url;
 }
 
 function setCache(text: string, url: string): void {
-	if (ttsCache.has(text)) {
-		ttsCache.delete(text);
+	const k = cacheKey(text);
+	if (ttsCache.has(k)) {
+		ttsCache.delete(k);
 	}
-	ttsCache.set(text, url);
+	ttsCache.set(k, url);
 	while (ttsCache.size > TTS_CACHE_SIZE) {
 		const firstKey = ttsCache.keys().next().value;
 		if (firstKey === undefined) {
@@ -88,8 +109,14 @@ function setCache(text: string, url: string): void {
 	}
 }
 
+/** 设置 TTS 配置（引擎/语音/语速），由设置页与 onload 调用 */
+export function setTTSConfig(cfg: TtsConfig): void {
+	currentConfig = cfg;
+}
+
+/** 兼容旧接口：仅设语速 */
 export function setTTSRate(rate: number): void {
-	currentRate = rate;
+	currentConfig = { ...currentConfig, rate };
 }
 
 export function clearTTSCache(): void {
@@ -112,27 +139,33 @@ async function fetchTTSBlob(text: string): Promise<string> {
 		);
 		return cached;
 	}
-	const url = buildTTSURL(text);
-	console.log("[nihong-ai-explain tts] 请求 URL", url);
-	const resp = await requestUrl({
-		url,
-		method: "GET",
-		headers: TTS_HEADERS,
-	});
-	console.log(
-		"[nihong-ai-explain tts] 响应 status=",
-		resp.status,
-		"withHeaders=true",
-		"arrayBuffer type=",
-		typeof resp.arrayBuffer,
-		"byteLength=",
-		resp.arrayBuffer?.byteLength,
-		"headers=",
-		resp.headers,
-	);
-	const buf = resp.arrayBuffer;
+	const engine = currentConfig.engine;
+	let buf: ArrayBuffer;
+	if (engine === "edge") {
+		console.log("[nihong-ai-explain tts] edge 引擎请求", text.slice(0, 30));
+		buf = await synthesizeEdge(
+			text,
+			currentConfig.voice,
+			formatEdgeRate(currentConfig.rate),
+		);
+	} else {
+		const url = buildTTSURL(text);
+		console.log("[nihong-ai-explain tts] google 引擎请求 URL", url);
+		const resp = await requestUrl({
+			url,
+			method: "GET",
+			headers: TTS_HEADERS,
+		});
+		console.log(
+			"[nihong-ai-explain tts] google 响应 status=",
+			resp.status,
+			"byteLength=",
+			resp.arrayBuffer?.byteLength,
+		);
+		buf = resp.arrayBuffer;
+	}
 	if (!buf || buf.byteLength === 0) {
-		throw new Error(`响应体为空（status=${resp.status}）`);
+		throw new Error(`${engine} TTS 响应体为空`);
 	}
 	const blob = new Blob([buf], { type: "audio/mpeg" });
 	const blobUrl = URL.createObjectURL(blob);
@@ -202,7 +235,8 @@ export async function speakText(text: string): Promise<void> {
 
 		const audio = new Audio(blobUrl);
 		audio.style.display = "none";
-		audio.playbackRate = currentRate;
+		// 语速处理：google 用 playbackRate；edge 已在 SSML 里设了 rate，这里不再叠加避免双重变速
+		audio.playbackRate = currentConfig.engine === "google" ? currentConfig.rate : 1.0;
 		currentAudio = audio;
 
 		if (!started) {
@@ -225,7 +259,17 @@ export async function speakText(text: string): Promise<void> {
 			if (currentAudio === audio) {
 				currentAudio = null;
 			}
-			new Notice("朗读失败：浏览器拒绝自动播放");
+			// 按 DOMException 名称区分：自动播放策略拦截 vs 音频源不支持
+			const errName = err instanceof DOMException ? err.name : "";
+			let msg: string;
+			if (errName === "NotAllowedError") {
+				msg = "朗读失败：浏览器拒绝自动播放";
+			} else if (errName === "NotSupportedError") {
+				msg = "朗读失败：音频格式不支持或数据无效";
+			} else {
+				msg = `朗读失败：${err instanceof Error ? err.message : String(err)}`;
+			}
+			new Notice(msg);
 			return;
 		}
 

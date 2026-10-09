@@ -23,7 +23,7 @@ import { getSelectionRect } from "./utils";
 import {
 	speakText,
 	stopSpeak,
-	setTTSRate,
+	setTTSConfig,
 	getTTSCacheSize,
 	clearTTSCache,
 } from "./tts";
@@ -47,7 +47,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		setTTSRate(this.settings.ttsRate);
+		setTTSConfig({
+			engine: this.settings.ttsEngine,
+			voice: this.settings.ttsEdgeVoice,
+			rate: this.settings.ttsRate,
+		});
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 
 		this.translateService = new TranslateService({

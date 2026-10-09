@@ -14,7 +14,8 @@ import type { JitendexSourceInfo } from "./dictionary/manager";
 import {
 	clearTTSCache,
 	getTTSCacheSize,
-	setTTSRate,
+	setTTSConfig,
+	type TtsEngine,
 } from "./tts";
 
 export interface ModelGroup {
@@ -59,6 +60,10 @@ export interface NihongAIExplainSettings {
 	dictFontSize: number;
 	/** TTS 朗读语速（0.5–3.0，1.0=正常） */
 	ttsRate: number;
+	/** TTS 引擎：google / edge */
+	ttsEngine: TtsEngine;
+	/** edge 引擎语音短名（如 ja-JP-NanamiNeural） */
+	ttsEdgeVoice: string;
 	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
 	disableLexisPill: boolean;
 }
@@ -87,8 +92,53 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	targetLanguage: "中文",
 	dictFontSize: 0,
 	ttsRate: 1.0,
+	ttsEngine: "google",
+	ttsEdgeVoice: "ja-JP-NanamiNeural",
 	disableLexisPill: false,
 };
+
+/** edge 语音列表缓存（会话内只拉一次） */
+let edgeVoicesCache: { shortName: string; friendlyName: string }[] | null = null;
+
+/**
+ * 拉取 edge-tts 日文语音列表（过滤 Locale 以 ja 开头）。
+ * 拉取失败返回降级固定列表。会话内缓存，不重复请求。
+ */
+async function fetchEdgeVoices(): Promise<{ shortName: string; friendlyName: string }[]> {
+	if (edgeVoicesCache) {
+		return edgeVoicesCache;
+	}
+	const VOICE_LIST_URL =
+		"https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+	try {
+		const resp = await requestUrl({ url: VOICE_LIST_URL, method: "GET", throw: false });
+		if (resp.status < 200 || resp.status >= 300) {
+			console.warn("[nihong-ai] 拉取 edge 语音列表失败: HTTP", resp.status);
+		} else {
+			const list = resp.json as Array<{
+				ShortName: string;
+				FriendlyName: string;
+				Locale: string;
+			}>;
+			const ja = list
+				.filter((v) => v.Locale && v.Locale.toLowerCase().startsWith("ja"))
+				.map((v) => ({ shortName: v.ShortName, friendlyName: v.FriendlyName }))
+				.sort((a, b) => a.shortName.localeCompare(b.shortName));
+			if (ja.length > 0) {
+				edgeVoicesCache = ja;
+				return ja;
+			}
+		}
+	} catch (e) {
+		console.warn("[nihong-ai] 拉取 edge 语音列表出错:", e);
+	}
+	// 降级固定列表
+	edgeVoicesCache = [
+		{ shortName: "ja-JP-NanamiNeural", friendlyName: "Microsoft Nanami Online (Natural) - Japanese (Japan)" },
+		{ shortName: "ja-JP-KeitaNeural", friendlyName: "Microsoft Keita Online (Natural) - Japanese (Japan)" },
+	];
+	return edgeVoicesCache;
+}
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
 	plugin: NihongAIExplainPlugin;
@@ -377,6 +427,67 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("朗读引擎")
+			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多。")
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("google", "Google Translate")
+					.addOption("edge", "Edge TTS")
+					.setValue(this.plugin.settings.ttsEngine)
+					.onChange(async (value) => {
+						const engine = value as TtsEngine;
+						this.plugin.settings.ttsEngine = engine;
+						await this.plugin.saveSettings();
+						setTTSConfig({
+							engine,
+							voice: this.plugin.settings.ttsEdgeVoice,
+							rate: this.plugin.settings.ttsRate,
+						});
+						this.display();
+					});
+			});
+
+		// edge 语音选择（仅 edge 引擎时显示）
+		if (this.plugin.settings.ttsEngine === "edge") {
+			const voiceSetting = new Setting(containerEl)
+				.setName("Edge 语音")
+				.setDesc("选择 Edge TTS 的日文语音。");
+			voiceSetting.addDropdown(async (dropdown) => {
+				// 占位项，拉取完成后替换
+				dropdown.addOption(
+					this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
+					"加载中…",
+				);
+				dropdown.setValue(
+					this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
+				);
+				const voices = await fetchEdgeVoices();
+				// 重新填充选项
+				dropdown.selectEl.empty();
+				for (const v of voices) {
+					dropdown.addOption(v.shortName, v.friendlyName);
+				}
+				// 若当前选中不在列表中，回退到第一个
+				const current = this.plugin.settings.ttsEdgeVoice;
+				if (!voices.some((v) => v.shortName === current)) {
+					const fallback = voices[0]?.shortName ?? "ja-JP-NanamiNeural";
+					this.plugin.settings.ttsEdgeVoice = fallback;
+					await this.plugin.saveSettings();
+				}
+				dropdown.setValue(this.plugin.settings.ttsEdgeVoice);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.ttsEdgeVoice = value;
+					await this.plugin.saveSettings();
+					setTTSConfig({
+						engine: "edge",
+						voice: value,
+						rate: this.plugin.settings.ttsRate,
+					});
+				});
+			});
+		}
+
+		new Setting(containerEl)
 			.setName("朗读语速")
 			.setDesc(
 				"TTS 朗读语速倍率，范围 0.5–3.0，1.0 为正常速度。修改后下次朗读生效。",
@@ -404,7 +515,11 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						valueSpan.setText(n.toFixed(1));
 						this.plugin.settings.ttsRate = n;
 						await this.plugin.saveSettings();
-						setTTSRate(n);
+						setTTSConfig({
+							engine: this.plugin.settings.ttsEngine,
+							voice: this.plugin.settings.ttsEdgeVoice,
+							rate: n,
+						});
 					});
 			});
 
