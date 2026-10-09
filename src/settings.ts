@@ -495,20 +495,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				"TTS 朗读语速倍率，范围 0.5–3.0，1.0 为正常速度。修改后下次朗读生效。",
 			)
 			.addSlider((slider: SliderComponent) => {
-				// 在滑块右侧追加常驻数值 span
-				const valueSpan = document.createElement("span");
-				valueSpan.className = "nihong-ai-tts-rate-value";
-				valueSpan.setCssStyles({
-					marginLeft: "8px",
-					minWidth: "2.5em",
-					textAlign: "right",
-				});
-				valueSpan.setText(this.plugin.settings.ttsRate.toFixed(1));
-				slider.sliderEl.parentElement?.insertBefore(
-					valueSpan,
-					slider.sliderEl.nextSibling,
-				);
-
 				slider
 					.setLimits(0.5, 3.0, 0.1)
 					.setValue(this.plugin.settings.ttsRate)
@@ -516,7 +502,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						// 步长 0.1 浮点累差容错：四舍五入到一位小数
 						const n = Math.round(value * 10) / 10;
-						valueSpan.setText(n.toFixed(1));
 						this.plugin.settings.ttsRate = n;
 						await this.plugin.saveSettings();
 						setTTSConfig({
