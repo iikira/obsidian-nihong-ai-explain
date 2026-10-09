@@ -49,7 +49,7 @@ export function formatEdgeRate(ttsRate: number): string {
  * @param text 待合成文本
  * @param voice 语音短名（如 ja-JP-NanamiNeural）
  * @param rate rate 百分比字符串（来自 formatEdgeRate）
- * @param timeoutMs 超时毫秒，默认 30000
+ * @param timeoutMs 超时毫秒，默认 10000（edge 连接失败时会较快报错）
  * @returns mp3 音频的 ArrayBuffer
  * @throws 连接失败 / 超时 / 未收到音频
  */
@@ -57,7 +57,7 @@ export async function synthesizeEdge(
 	text: string,
 	voice: string,
 	rate: string,
-	timeoutMs = 30000,
+	timeoutMs = 10000,
 ): Promise<ArrayBuffer> {
 	const communicate = new Communicate(text, { voice, rate });
 
@@ -65,7 +65,7 @@ export async function synthesizeEdge(
 	let audioReceived = false;
 
 	const timeoutPromise = new Promise<never>((_, reject) => {
-		setTimeout(() => reject(new Error(`edge-tts 合成超时（${timeoutMs}ms）`)), timeoutMs);
+		setTimeout(() => reject(new Error(`edge-tts 合成超时（${timeoutMs}ms），可能是网络无法连接 speech.platform.bing.com`)), timeoutMs);
 	});
 
 	const synth = (async (): Promise<ArrayBuffer> => {
@@ -80,7 +80,7 @@ export async function synthesizeEdge(
 			}
 		}
 		if (!audioReceived) {
-			throw new Error("edge-tts 未收到音频数据");
+			throw new Error("edge-tts 未收到音频数据（可能是网络无法连接 speech.platform.bing.com，建议切回 Google 引擎）");
 		}
 		const total = chunks.reduce((s, c) => s + c.length, 0);
 		const merged = new Uint8Array(total);

@@ -426,66 +426,67 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		const engineSetting = new Setting(containerEl)
 			.setName("朗读引擎")
-			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多。")
-			.addDropdown((dropdown) => {
-				dropdown
-					.addOption("google", "Google Translate")
-					.addOption("edge", "Edge TTS")
-					.setValue(this.plugin.settings.ttsEngine)
-					.onChange(async (value) => {
-						const engine = value as TtsEngine;
-						this.plugin.settings.ttsEngine = engine;
-						await this.plugin.saveSettings();
-						setTTSConfig({
-							engine,
-							voice: this.plugin.settings.ttsEdgeVoice,
-							rate: this.plugin.settings.ttsRate,
-						});
-						this.display();
-					});
-			});
+			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多。");
 
-		// edge 语音选择（仅 edge 引擎时显示）
-		if (this.plugin.settings.ttsEngine === "edge") {
-			const voiceSetting = new Setting(containerEl)
-				.setName("Edge 语音")
-				.setDesc("选择 Edge TTS 的日文语音。");
-			voiceSetting.addDropdown(async (dropdown) => {
-				// 占位项，拉取完成后替换
-				dropdown.addOption(
-					this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
-					"加载中…",
-				);
-				dropdown.setValue(
-					this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
-				);
-				const voices = await fetchEdgeVoices();
-				// 重新填充选项
-				dropdown.selectEl.empty();
-				for (const v of voices) {
-					dropdown.addOption(v.shortName, v.friendlyName);
-				}
-				// 若当前选中不在列表中，回退到第一个
-				const current = this.plugin.settings.ttsEdgeVoice;
-				if (!voices.some((v) => v.shortName === current)) {
-					const fallback = voices[0]?.shortName ?? "ja-JP-NanamiNeural";
-					this.plugin.settings.ttsEdgeVoice = fallback;
-					await this.plugin.saveSettings();
-				}
-				dropdown.setValue(this.plugin.settings.ttsEdgeVoice);
-				dropdown.onChange(async (value) => {
-					this.plugin.settings.ttsEdgeVoice = value;
-					await this.plugin.saveSettings();
-					setTTSConfig({
-						engine: "edge",
-						voice: value,
-						rate: this.plugin.settings.ttsRate,
-					});
+		// edge 语音选择（始终创建，按引擎显隐，避免切换时重渲染整个页面）
+		const edgeVoiceSetting = new Setting(containerEl)
+			.setName("Edge 语音")
+			.setDesc("选择 Edge TTS 的日文语音。");
+		// 初始显隐：仅 edge 时显示
+		edgeVoiceSetting.settingEl.toggle(this.plugin.settings.ttsEngine === "edge");
+
+		// 语音下拉异步填充（仅在显示时拉取）
+		edgeVoiceSetting.addDropdown(async (dropdown) => {
+			dropdown.addOption(
+				this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
+				"加载中…",
+			);
+			dropdown.setValue(
+				this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
+			);
+			const voices = await fetchEdgeVoices();
+			dropdown.selectEl.empty();
+			for (const v of voices) {
+				dropdown.addOption(v.shortName, v.friendlyName);
+			}
+			const current = this.plugin.settings.ttsEdgeVoice;
+			if (!voices.some((v) => v.shortName === current)) {
+				const fallback = voices[0]?.shortName ?? "ja-JP-NanamiNeural";
+				this.plugin.settings.ttsEdgeVoice = fallback;
+				await this.plugin.saveSettings();
+			}
+			dropdown.setValue(this.plugin.settings.ttsEdgeVoice);
+			dropdown.onChange(async (value) => {
+				this.plugin.settings.ttsEdgeVoice = value;
+				await this.plugin.saveSettings();
+				setTTSConfig({
+					engine: this.plugin.settings.ttsEngine,
+					voice: value,
+					rate: this.plugin.settings.ttsRate,
 				});
 			});
-		}
+		});
+
+		engineSetting.addDropdown((dropdown) => {
+			dropdown
+				.addOption("google", "Google Translate")
+				.addOption("edge", "Edge TTS")
+				.setValue(this.plugin.settings.ttsEngine)
+				.onChange(async (value) => {
+					const engine = value as TtsEngine;
+					this.plugin.settings.ttsEngine = engine;
+					await this.plugin.saveSettings();
+					setTTSConfig({
+						engine,
+						voice: this.plugin.settings.ttsEdgeVoice,
+						rate: this.plugin.settings.ttsRate,
+					});
+					// 仅切换 Edge 语音行的显隐，不重渲染整个页面
+					edgeVoiceSetting.settingEl.toggle(engine === "edge");
+				});
+		});
 
 		new Setting(containerEl)
 			.setName("朗读语速")
