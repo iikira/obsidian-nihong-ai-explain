@@ -20,6 +20,7 @@
 	"author": "iikira",
 	"license": "GPL-3.0-only",
 	"dependencies": {
+		"edge-tts-universal": "^1.4.0",
 		"fflate": "^0.8.2",
 		"idb": "^8.0.0"
 	},

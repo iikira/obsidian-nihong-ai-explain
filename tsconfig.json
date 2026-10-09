@@ -9,7 +9,7 @@
 		"noImplicitAny": true,
 		"strictNullChecks": true,
 		"strict": true,
-		"moduleResolution": "node",
+		"moduleResolution": "bundler",
 		"importHelpers": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
