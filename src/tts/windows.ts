@@ -1,20 +1,34 @@
 /**
- * Windows 系统朗读引擎：通过 PowerShell 调用系统自带 SAPI5 SpVoice 合成语音。
+ * Windows 系统朗读引擎：运行时释放内嵌的 onecore_tts.exe（C#，.NET Framework 原生 WinRT），
+ * 调用 Windows OneCore 自然语音（Ayumi / Haruka / Ichiro，ja-JP）合成 WAV。
  *
- * 仅 Windows 桌面端可用：Obsidian 桌面端基于 Electron，可通过 window.require
- * 访问 Node 的 child_process 启动 powershell.exe。移动端（iOS/Android）无
- * child_process / PowerShell，不可用。
+ * 背景：Obsidian 桌面端基于 Electron，可通过 window.require 访问 Node child_process
+ * 启动子进程。OneCore 自然语音需走 WinRT SpeechSynthesizer；PowerShell 5.1 无法读取
+ * WinRT 异步结果、pwsh 缺 WinRT 投影程序集，故改为预编译的 C# 工具。该工具只依赖
+ * 系统自带的 .NET Framework 4.x + 系统 WinRT 元数据，无需额外运行时，零下载、离线可用。
  *
- * 与 edge-tts（微软在线云服务）不同：本引擎调用操作系统本地 SAPI5，完全离线，
- * 不依赖网络。音质为传统拼接合成，不如 Edge Neural，定位为离线备用。
+ * exe 以 base64 字符串内嵌进 bundle（构建时生成 onecoreTtsB64.ts，方式与声调数据一致），
+ * 运行时解码写出到系统临时目录再执行，随插件自包含、无需随包分发二进制文件。
  *
- * 编码要点：日语文本经 Node → PowerShell 传参必然乱码，故把整段 PowerShell
- * 脚本（含日语文本）以 UTF-16LE base64 编码后用 -EncodedCommand 传递。
+ * 可用性：仅 Windows 桌面端（Electron + win32 + child_process 可访问）。移动端不可用。
+ * 若 exe 释放/执行失败（例如系统版本太低、.NET Framework 缺失），探测标记为不可用，
+ * 设置页据此不显示 Windows 语音选项，由上层回退到其它引擎。
+ *
+ * 编码要点：SSML 与日语文本经 Node → 子进程 argv 传递，Windows 下 Node 用 UTF-16 编码
+ * 参数，C# Main(args) 可正确收到，无需像 PowerShell 那样用 base64。
  */
 
-// 仅桌面端 Electron 环境有 window.require，用动态 require 拿 child_process
+import { ONECORE_TTS_B64 } from "./onecore/onecoreTtsB64";
+
+// 仅桌面端 Electron 环境有 window.require，用动态 require 拿 child_process / fs / os
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const g: any = globalThis as any;
+
+/** 运行时释放后的 onecore_tts.exe 绝对路径（会话内缓存，避免重复写出） */
+let ttsExePath: string | null = null;
+
+/** exe 实际可运行性探测结果：null=未测，true=可用，false=不可用 */
+let windowsProbe: boolean | null = null;
 
 /** 拿到 child_process.execFile（仅桌面端可用；移动端返回 null） */
 function getExecFile(): ((file: string, args: string[], opts: Record<string, unknown>, cb: (err: Error | null, stdout: string, stderr: string) => void) => void) | null {
@@ -27,107 +41,212 @@ function getExecFile(): ((file: string, args: string[], opts: Record<string, unk
 }
 
 /**
- * 检测 Windows 系统朗读是否可用：桌面端 + Windows 平台 + child_process 可访问。
- * 移动端 / macOS / Linux 返回 false。
+ * 把内嵌的 onecore_tts.exe（base64）解码写出到系统临时目录，返回路径。
+ * 成功则缓存路径；失败（内嵌数据为空 / fs/os/path 不可用 / 写盘出错）返回 null。
+ */
+function ensureTtsExe(): string | null {
+	if (ttsExePath) {
+		return ttsExePath;
+	}
+	if (!ONECORE_TTS_B64) {
+		console.warn("[nihong-ai-explain tts] 内嵌的 onecore_tts.exe 数据为空，无法释放");
+		return null;
+	}
+	const fs = g.require?.("fs");
+	const os = g.require?.("os");
+	const path = g.require?.("path");
+	if (typeof fs?.writeFileSync !== "function" || typeof os?.tmpdir !== "function" || typeof path?.join !== "function") {
+		console.warn("[nihong-ai-explain tts] fs/os/path 不可用，无法释放 onecore_tts.exe");
+		return null;
+	}
+	try {
+		// base64 → 字节
+		const binStr = atob(ONECORE_TTS_B64);
+		const bytes = new Uint8Array(binStr.length);
+		for (let i = 0; i < binStr.length; i++) {
+			bytes[i] = binStr.charCodeAt(i);
+		}
+		const exe = path.join(os.tmpdir(), "nihong_ai_onecore_tts.exe");
+		fs.writeFileSync(exe, bytes);
+		ttsExePath = exe;
+		return exe;
+	} catch (e) {
+		console.warn("[nihong-ai-explain tts] 释放 onecore_tts.exe 失败:", e);
+		return null;
+	}
+}
+
+/**
+ * 检测 Windows OneCore 朗读是否可用：桌面端 + Windows 平台 + child_process 可访问 + 内嵌 exe 可释放。
+ * 移动端 / macOS / Linux / 内嵌数据缺失返回 false。
  */
 export function isWindowsTTSAvailable(): boolean {
 	try {
 		const platform = g.process?.platform;
 		const execFile = getExecFile();
-		return platform === "win32" && execFile !== null;
+		if (platform !== "win32" || !execFile) {
+			return false;
+		}
+		// 内嵌 exe 数据存在 + 具备释放条件（fs/os/path）
+		if (!ONECORE_TTS_B64) {
+			return false;
+		}
+		const fs = g.require?.("fs");
+		const os = g.require?.("os");
+		const path = g.require?.("path");
+		return typeof fs?.writeFileSync === "function" && typeof os?.tmpdir === "function" && typeof path?.join === "function";
 	} catch {
 		return false;
 	}
 }
 
 /**
- * 把统一语速倍率（0.5–3.0，1.0=正常）映射到 SAPI Rate（-10~10，0=正常）。
- * 1.0 → 0，2.0 → 5，3.0 → 10，0.5 → -5。clamp 到 [-10, 10]。
+ * 探测 onecore_tts.exe 在目标机器上是否真的能运行（执行 list 校验退出码与输出）。
+ * 结果会话内缓存。用于设置页决定是否显示 Windows 语音选项：若 exe 因版本太低等原因
+ * 执行失败，返回 false，从而不显示对应选项。返回 Promise<boolean>。
  */
-export function formatWindowsRate(ttsRate: number): number {
-	const r = Math.round((ttsRate - 1) * 5);
-	if (r < -10) {
-		return -10;
+export async function probeWindowsTTSOnce(): Promise<boolean> {
+	if (windowsProbe !== null) {
+		return windowsProbe;
 	}
-	if (r > 10) {
-		return 10;
+	const execFile = getExecFile();
+	if (!execFile || g.process?.platform !== "win32") {
+		windowsProbe = false;
+		return false;
 	}
-	return r;
+	const exe = ensureTtsExe();
+	if (!exe) {
+		windowsProbe = false;
+		return false;
+	}
+	windowsProbe = await new Promise<boolean>((resolve) => {
+		try {
+			execFile(
+				exe!,
+				["list"],
+				{ timeout: 8000, windowsHide: true },
+				(err, stdout) => {
+					resolve(!err && /VOICE\|/.test(stdout || ""));
+				},
+			);
+		} catch {
+			// execFile 对无法启动的 exe 会同步抛 spawn 异常（如系统版本太低、文件损坏），视为不可用
+			resolve(false);
+		}
+	});
+	if (!windowsProbe) {
+		console.warn("[nihong-ai-explain tts] onecore_tts.exe 执行失败，Windows 系统朗读不可用");
+	}
+	return windowsProbe;
 }
 
-/** Windows 语音条目（GetVoices() 返回的描述） */
+/**
+ * 把统一语速倍率（0.5–3.0，1.0=正常）映射为 SSML prosody rate 百分比（+X% / -X%）。
+ * 1.0 → +0%，2.0 → +100%，0.5 → -50%。clamp 到 [-75%, +200%]。
+ */
+export function formatWindowsRate(ttsRate: number): string {
+	let pct = Math.round((ttsRate - 1) * 100);
+	if (pct < -75) {
+		pct = -75;
+	}
+	if (pct > 200) {
+		pct = 200;
+	}
+	return (pct >= 0 ? "+" : "") + pct + "%";
+}
+
+/** Windows 语音条目（OneCore DisplayName + 语言） */
 export interface WindowsVoice {
-	/** SAPI voice 的完整描述（GetDescription()），用作合成时的匹配标识 */
+	/** OneCore 语音的 DisplayName（如 "Microsoft Ayumi"），用作合成时的匹配标识 */
 	id: string;
-	/** 显示名称（去掉冗余前缀后的友好名） */
+	/** 显示名称（去掉 "Microsoft " 前缀后的友好名） */
 	name: string;
 }
 
-/** 语音列表会话内缓存（避免每次设置页打开都起 PowerShell） */
+/** 语音列表会话内缓存（避免每次设置页打开都起子进程） */
 let windowsVoicesCache: WindowsVoice[] | null = null;
 
+/** 日语语音的语言标签前缀（OneCore DisplayName 的 Language 属性，如 "ja-JP"） */
+const JAPANESE_LANG_PREFIX = "ja";
+
+/** 是否仅枚举日语语音（插件面向日语学习，非日语 OneCore 语音无意义） */
+let onlyJapanese = true;
+
+/** 设置是否仅枚举日语语音 */
+export function setWindowsVoicesJapaneseOnly(v: boolean): void {
+	onlyJapanese = v;
+}
+
 /**
- * 枚举系统已安装的日语语音（SAPI5 SpVoice.GetVoices() 中描述含 "Japanese" 的）。
- * 仅 Windows 桌面端可用；非 Windows / 不可用返回空数组。会话内缓存。
+ * 枚举系统已安装的 OneCore 语音（默认过滤出日语的，如 Ayumi/Haruka/Ichiro）。
+ * 仅 Windows 桌面端可用；exe 释放/执行失败返回空数组。会话内缓存。
  */
 export async function listWindowsVoices(): Promise<WindowsVoice[]> {
 	if (windowsVoicesCache) {
 		return windowsVoicesCache;
 	}
-	const execFile = getExecFile();
-	console.log("[nihong-ai-explain tts] listWindowsVoices: platform=", g.process?.platform, "execFile=", !!execFile);
-	if (!execFile || g.process?.platform !== "win32") {
+	if (!(await probeWindowsTTSOnce())) {
 		windowsVoicesCache = [];
 		return windowsVoicesCache;
 	}
-	// 用单引号包裹的换行符作为 join 分隔，避免脚本里嵌入反引号转义
-	const sep = String.fromCharCode(10); // \n
-	const psScript = [
-		`$ErrorActionPreference = 'Stop'`,
-		`$sp = New-Object -ComObject SAPI.SpVoice`,
-		`$out = @()`,
-		`foreach ($v in $sp.GetVoices()) {`,
-		`  $d = $v.GetDescription()`,
-		`  if ($d -like '*Japanese*') { $out += $d }`,
-		`}`,
-		`[string]::Join('${sep}', $out)`,
-	].join("\r\n");
-	const encodedCommand = Buffer.from(psScript, "utf16le").toString("base64");
+	const execFile = getExecFile();
+	const exe = ttsExePath!;
 	const rawLines: string[] = await new Promise<string[]>((resolve) => {
-		execFile(
-			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodedCommand],
+		execFile!(
+			exe,
+			["list"],
 			{ timeout: 15000, windowsHide: true },
-			(err, stdout, stderr) => {
+			(err, stdout) => {
 				if (err) {
 					console.warn("[nihong-ai-explain tts] 枚举 Windows 语音失败:", err.message);
+					windowsProbe = false;
 					resolve([]);
 					return;
 				}
-				const text = (stdout || "").replace(/<#[^]*#>/g, "").trim();
-				const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-				console.log("[nihong-ai-explain tts] 枚举到 Windows 语音原始行:", lines, "stderr:", (stderr || "").slice(0, 120));
+				const lines = (stdout || "")
+					.split(/\r?\n/)
+					.map((s) => s.trim())
+					.filter((s) => s.startsWith("VOICE|"));
 				resolve(lines);
 			},
 		);
 	});
-	const voices: WindowsVoice[] = rawLines.map((line) => ({
-		id: line,
-		// 友好名：去掉 "Microsoft " 前缀与 " - Japanese" 后缀
-		name: line.replace(/^Microsoft\s+/i, "").replace(/\s*-\s*Japanese.*$/i, ""),
-	}));
+	const voices: WindowsVoice[] = [];
+	for (const line of rawLines) {
+		const parts = line.split("|");
+		const displayName = parts[1];
+		const lang = parts[2] || "";
+		if (!displayName) {
+			continue;
+		}
+		if (onlyJapanese && !lang.toLowerCase().startsWith(JAPANESE_LANG_PREFIX)) {
+			continue;
+		}
+		voices.push({
+			id: displayName,
+			name: displayName.replace(/^Microsoft\s+/i, ""),
+		});
+	}
 	windowsVoicesCache = voices;
 	return voices;
 }
 
+/** XML 转义，防止文本中的 < & > 破坏 SSML 结构 */
+function xmlEscape(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
+}
+
 /**
- * 合成语音：PowerShell 调用 SAPI5 SpVoice，输出 WAV（PCM），返回 ArrayBuffer。
+ * 合成语音：释放并调用 onecore_tts.exe 用 OneCore 自然语音输出 WAV（PCM），返回 ArrayBuffer。
  *
  * @param text 待合成文本
  * @param rate 统一语速倍率（0.5–3.0，1.0=正常）
- * @param voice 语音描述（GetDescription() 的精确匹配；空则取第一个日语语音）
+ * @param voice 语音 DisplayName（如 "Microsoft Ayumi"；空则用 exe 默认 Ayumi）
  * @returns WAV 音频的 ArrayBuffer
- * @throws 非 Windows 平台 / child_process 不可用 / 合成失败 / 未返回数据
+ * @throws 非 Windows 平台 / child_process 不可用 / exe 释放或执行失败 / 合成失败 / 未返回数据
  */
 export async function synthesizeWindows(
 	text: string,
@@ -138,58 +257,71 @@ export async function synthesizeWindows(
 	if (!execFile || g.process?.platform !== "win32") {
 		throw new Error("Windows 系统朗读仅在 Windows 桌面端可用");
 	}
+	const exe = ensureTtsExe();
+	if (!exe) {
+		throw new Error("onecore_tts.exe 释放失败，Windows 系统朗读不可用");
+	}
 
-	const sapiRate = formatWindowsRate(rate);
-	// 日语文本 → UTF-16LE base64，脚本内解码，避免编码乱码
-	const textBase64 = Buffer.from(text, "utf16le").toString("base64");
-	// 语音匹配：优先精确匹配描述，其次匹配 *Japanese*，找不到则用默认
-	const voiceMatchBase64 = Buffer.from(voice || "", "utf16le").toString("base64");
-	const psScript = [
-		`$ErrorActionPreference = 'Stop'`,
-		`$text = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${textBase64}'))`,
-		`$voiceDesc = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${voiceMatchBase64}'))`,
-		`$sp = New-Object -ComObject SAPI.SpVoice`,
-		`$ja = $null`,
-		`foreach ($v in $sp.GetVoices()) {`,
-		`  $d = $v.GetDescription()`,
-		`  if ($voiceDesc -and $d -eq $voiceDesc) { $ja = $v; break }`,
-		`}`,
-		`if (-not $ja) { foreach ($v in $sp.GetVoices()) { if ($v.GetDescription() -like '*Japanese*') { $ja = $v; break } } }`,
-		`if ($ja) { $sp.Voice = $ja }`,
-		`$sp.Rate = ${sapiRate}`,
-		`$p = Join-Path $env:TEMP 'nihong_ai_tts.wav'`,
-		`$s = New-Object -ComObject SAPI.SpFileStream`,
-		`$s.Open($p, 3, 0)`,
-		`$sp.AudioOutputStream = $s`,
-		`$sp.Speak($text, 0) | Out-Null`,
-		`$s.Close()`,
-		`$b = [System.IO.File]::ReadAllBytes($p)`,
-		`[Convert]::ToBase64String($b)`,
-		`Remove-Item $p -Force`,
-	].join("\r\n");
+	const rateStr = formatWindowsRate(rate);
+	const escaped = xmlEscape(text);
+	// SSML：<prosody rate> 控速，xml:lang 为日语
+	const ssml = `<speak version="1.0" xml:lang="ja-JP"><prosody rate="${rateStr}">${escaped}</prosody></speak>`;
 
-	// 整段脚本以 UTF-16LE base64 用 -EncodedCommand 传递，确保 Unicode 安全
-	const encodedCommand = Buffer.from(psScript, "utf16le").toString("base64");
+	// 输出到系统临时目录的固定文件
+	const outPath = `${g.process.env?.TEMP ?? g.process.env?.TMP ?? "."}/nihong_ai_onecore.wav`;
 
 	return new Promise<ArrayBuffer>((resolve, reject) => {
-		execFile(
-			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodedCommand],
-			{ timeout: 30000, windowsHide: true, maxBuffer: 20 * 1024 * 1024 },
-			(err, stdout) => {
-				if (err) {
-					reject(new Error(`Windows SAPI 朗读失败: ${err.message}`));
-					return;
-				}
-				const base64 = (stdout || "").trim();
-				// 过滤 PS 可能输出的非 base64 行，取最后一段长字符串
-				const match = base64.match(/[A-Za-z0-9+/=]{100,}/);
-				if (!match) {
-					reject(new Error("Windows SAPI 朗读未返回音频数据（请确认系统已安装日语语音包）"));
-					return;
-				}
-				resolve(Buffer.from(match[0], "base64").buffer);
-			},
-		);
+		try {
+			execFile!(
+				exe,
+				["synth", ssml, outPath, voice || "Ayumi"],
+				{ timeout: 30000, windowsHide: true, maxBuffer: 20 * 1024 * 1024 },
+				(err, stdout) => {
+					if (err) {
+						reject(new Error(`Windows OneCore 朗读失败: ${err.message}`));
+						return;
+					}
+					// 成功输出 "WAV|<path>|<bytes>"；失败输出 "ERR|<type>|<message>"
+					const wavMatch = (stdout || "").match(/^WAV\|(.+)\|(\d+)$/m);
+					if (!wavMatch) {
+						const errLine = (stdout || "").match(/^ERR\|([^|]*)\|(.*)$/m);
+						reject(
+							new Error(
+								errLine
+									? `Windows OneCore 朗读失败: ${errLine[2] || errLine[1]}`
+									: "Windows OneCore 朗读未返回音频数据（请确认已安装日语语音包）",
+							),
+						);
+						return;
+					}
+					const size = Number(wavMatch[2]);
+					if (!size || size <= 0) {
+						reject(new Error("Windows OneCore 朗读返回空音频"));
+						return;
+					}
+					// 从 exe 输出路径读回字节（用 globalThis.require 拿 fs，避免 esbuild 打包 node 模块）
+					const fs = g.require?.("fs");
+					if (typeof fs?.readFile !== "function") {
+						reject(new Error("读取 OneCore 音频失败：fs 不可用"));
+						return;
+					}
+					fs.readFile(wavMatch[1], (ferr: Error | null, data: Buffer) => {
+						if (ferr) {
+							reject(new Error(`读取 OneCore 音频失败: ${ferr.message}`));
+							return;
+						}
+						// 转 ArrayBuffer（Buffer.buffer 可能是 SharedArrayBuffer，需显式收窄）
+						const ab = data.buffer.slice(
+							data.byteOffset,
+							data.byteOffset + data.byteLength,
+						) as ArrayBuffer;
+						resolve(ab);
+					});
+				},
+			);
+		} catch {
+			// exe 无法启动（如系统版本太低）时同步抛 spawn 异常，转为 reject
+			reject(new Error("Windows OneCore 朗读失败：无法启动 onecore_tts.exe"));
+		}
 	});
 }

@@ -1,8 +1,13 @@
 import { Notice, requestUrl } from "obsidian";
 import { synthesizeEdge, formatEdgeRate } from "./edge";
-import { synthesizeWindows, isWindowsTTSAvailable, listWindowsVoices } from "./windows";
+import {
+	synthesizeWindows,
+	isWindowsTTSAvailable,
+	listWindowsVoices,
+	probeWindowsTTSOnce,
+} from "./windows";
 
-export { isWindowsTTSAvailable, listWindowsVoices };
+export { isWindowsTTSAvailable, listWindowsVoices, probeWindowsTTSOnce };
 
 const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
@@ -77,9 +82,9 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((r) => window.setTimeout(r, ms));
 }
 
-/** 缓存 key 加引擎前缀，防止 google / edge 同文本缓存串 */
+/** 缓存 key 加引擎 + 语音前缀，防止 google / edge / 不同语音同文本缓存串 */
 function cacheKey(text: string): string {
-	return `${currentConfig.engine}::${text}`;
+	return `${currentConfig.engine}::${currentConfig.voice}::${text}`;
 }
 
 function getCache(text: string): string | null {

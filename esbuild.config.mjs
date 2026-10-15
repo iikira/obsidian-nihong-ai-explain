@@ -15,6 +15,10 @@ const prod = (process.argv[2] === "production");
 const prepareOnly = process.argv.includes("--prepare-accents");
 
 const STATIC_ASSETS = ["manifest.json", "styles.css"];
+/** Windows OneCore TTS 工具（C# exe）：构建时读取其字节，base64 内嵌进 bundle，运行时释放执行 */
+const TTS_EXE_SRC = "src/tts/onecore/onecore_tts.exe";
+/** 构建生成的 exe 内嵌数据模块（供 bundle 引入，gitignore） */
+const ONECORE_B64_PATH = "src/tts/onecore/onecoreTtsB64.ts";
 
 const ACCENTS_URL =
 	"https://raw.githubusercontent.com/mifunetoshiro/kanjium/master/data/source_files/raw/accents.txt";
@@ -90,6 +94,23 @@ function cleanDist() {
 	rmSync("dist", { recursive: true, force: true });
 }
 
+/**
+ * 把 onecore_tts.exe 的字节 base64 编码，写入字符串字面量模块
+ * src/tts/onecore/onecoreTtsB64.ts，供 bundle 以 import 引入。
+ * 运行时（src/tts/windows.ts）解码写出到临时目录再执行，随插件自包含、无需分发二进制。
+ * 文件缺失时写入空串，Windows 系统朗读功能静默降级（设置页不显示选项）。
+ */
+function writeOnecoreB64Module() {
+	let b64 = "";
+	if (existsSync(TTS_EXE_SRC)) {
+		b64 = readFileSync(TTS_EXE_SRC).toString("base64");
+	} else {
+		console.warn(`[build] ${TTS_EXE_SRC} 不存在，生成空 OneCore TTS 数据模块`);
+	}
+	writeFileSync(ONECORE_B64_PATH, `export const ONECORE_TTS_B64 = ${JSON.stringify(b64)};\n`);
+	console.log(`[build] 已生成 OneCore TTS 数据模块 -> ${ONECORE_B64_PATH} (base64 ${b64.length} 字符)`);
+}
+
 if (prod) {
 	cleanDist();
 }
@@ -100,9 +121,10 @@ async function prepareAccents() {
 	writeAccentsDataModule();
 }
 
-// 仅准备 accentsData.ts（typecheck/build 前调用，避免 tsc 因缺失模块报错）后退出
+// 仅准备 accentsData.ts / onecoreTtsB64.ts（typecheck/build 前调用，避免 tsc 因缺失模块报错）后退出
 if (prepareOnly) {
 	await prepareAccents();
+	writeOnecoreB64Module();
 	process.exit(0);
 }
 
@@ -142,6 +164,7 @@ if (prod) {
 	if (!accentsDataExists) {
 		await prepareAccents();
 	}
+	writeOnecoreB64Module();
 	await context.rebuild();
 	syncStaticAssets();
 	process.exit(0);
@@ -149,6 +172,7 @@ if (prod) {
 	if (!accentsDataExists) {
 		await prepareAccents();
 	}
+	writeOnecoreB64Module();
 	syncStaticAssets();
 	await context.watch();
 }

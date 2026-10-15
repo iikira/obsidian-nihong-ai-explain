@@ -18,6 +18,7 @@ import {
 	type TtsEngine,
 	isWindowsTTSAvailable,
 	listWindowsVoices,
+	probeWindowsTTSOnce,
 } from "./tts";
 
 export interface ModelGroup {
@@ -66,7 +67,7 @@ export interface NihongAIExplainSettings {
 	ttsEngine: TtsEngine;
 	/** edge 引擎语音短名（如 ja-JP-NanamiNeural） */
 	ttsEdgeVoice: string;
-	/** windows 引擎语音描述（SAPI GetDescription()，如 Microsoft Haruka Desktop - Japanese） */
+	/** windows 引擎语音 DisplayName（OneCore 自然语音，如 Microsoft Ayumi） */
 	ttsWindowsVoice: string;
 	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
 	disableLexisPill: boolean;
@@ -529,13 +530,16 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			dropdown
 				.addOption("google", "Google Translate")
 				.addOption("edge", "Edge TTS");
-			// Windows 系统朗读仅在 Windows 桌面端可选
-			if (isWindowsTTSAvailable()) {
+			// Windows 系统朗读仅在 Windows 桌面端可选，且内嵌 onecore_tts.exe 需真实可用：
+			// 若 exe 在目标机器执行失败（如系统版本太低、.NET Framework 缺失），探测返回 false，
+			// 则不显示该选项，由用户回退到其它引擎。
+			const winAvail = await probeWindowsTTSOnce();
+			if (winAvail) {
 				dropdown.addOption("windows", "Windows 系统朗读");
 			}
-			// 若当前值不可用（如移动端选中过 windows），回退到 google
+			// 若当前值不可用（如移动端选中过 windows，或 exe 执行失败），回退到 google
 			let value = this.plugin.settings.ttsEngine;
-			if (value === "windows" && !isWindowsTTSAvailable()) {
+			if (value === "windows" && !winAvail) {
 				value = "google";
 				this.plugin.settings.ttsEngine = "google";
 				await this.plugin.saveSettings();

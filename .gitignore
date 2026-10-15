@@ -149,6 +149,10 @@ dist/
 # 构建时下载的 kanjium accents.txt 缓存与生成的字面量模块（不提交）
 .cache/
 src/dictionary/data/accentsData.ts
+# 构建时生成的 OneCore TTS exe 内嵌数据模块（不提交）
+src/tts/onecore/onecoreTtsB64.ts
+# 编译生成的 OneCore TTS 工具（源码 OneCoreTts.cs + build.ps1 已提交，exe 由 build.ps1 本地生成）
+src/tts/onecore/onecore_tts.exe
 
 # Test build output (esbuild-compiled test files)
 test-dist/
