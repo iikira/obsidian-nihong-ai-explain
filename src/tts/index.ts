@@ -1,5 +1,8 @@
 import { Notice, requestUrl } from "obsidian";
 import { synthesizeEdge, formatEdgeRate } from "./edge";
+import { synthesizeWindows, isWindowsTTSAvailable, listWindowsVoices } from "./windows";
+
+export { isWindowsTTSAvailable, listWindowsVoices };
 
 const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
@@ -17,12 +20,12 @@ const TTS_HEADERS = {
 };
 
 /** TTS 引擎类型 */
-export type TtsEngine = "google" | "edge";
+export type TtsEngine = "google" | "edge" | "windows";
 
-/** TTS 配置：引擎、语音（edge 用）、语速（1.0=正常） */
+/** TTS 配置：引擎、语音（edge/windows 用）、语速（1.0=正常） */
 export interface TtsConfig {
 	engine: TtsEngine;
-	/** edge 引擎的语音短名（如 ja-JP-NanamiNeural）；google 忽略 */
+	/** edge 引擎的语音短名 / windows 引擎的语音描述；google 忽略 */
 	voice: string;
 	/** 朗读语速倍率（0.5–3.0，1.0=正常） */
 	rate: number;
@@ -148,6 +151,9 @@ async function fetchTTSBlob(text: string): Promise<string> {
 			currentConfig.voice,
 			formatEdgeRate(currentConfig.rate),
 		);
+	} else if (engine === "windows") {
+		console.log("[nihong-ai-explain tts] windows 引擎请求", text.slice(0, 30));
+		buf = await synthesizeWindows(text, currentConfig.rate, currentConfig.voice);
 	} else {
 		const url = buildTTSURL(text);
 		console.log("[nihong-ai-explain tts] google 引擎请求 URL", url);
@@ -167,7 +173,9 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	if (!buf || buf.byteLength === 0) {
 		throw new Error(`${engine} TTS 响应体为空`);
 	}
-	const blob = new Blob([buf], { type: "audio/mpeg" });
+	// google/edge 返回 mp3，windows 返回 wav
+	const mime = engine === "windows" ? "audio/wav" : "audio/mpeg";
+	const blob = new Blob([buf], { type: mime });
 	const blobUrl = URL.createObjectURL(blob);
 	setCache(text, blobUrl);
 	return blobUrl;
@@ -235,7 +243,7 @@ export async function speakText(text: string): Promise<void> {
 
 		const audio = new Audio(blobUrl);
 		audio.setCssStyles({ display: "none" });
-		// 语速处理：google 用 playbackRate；edge 已在 SSML 里设了 rate，这里不再叠加避免双重变速
+		// 语速处理：google 用 playbackRate；edge/windows 已在合成端设了 rate，这里不再叠加避免双重变速
 		audio.playbackRate = currentConfig.engine === "google" ? currentConfig.rate : 1.0;
 		currentAudio = audio;
 

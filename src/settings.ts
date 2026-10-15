@@ -16,6 +16,8 @@ import {
 	getTTSCacheSize,
 	setTTSConfig,
 	type TtsEngine,
+	isWindowsTTSAvailable,
+	listWindowsVoices,
 } from "./tts";
 
 export interface ModelGroup {
@@ -60,10 +62,12 @@ export interface NihongAIExplainSettings {
 	dictFontSize: number;
 	/** TTS 朗读语速（0.5–3.0，1.0=正常） */
 	ttsRate: number;
-	/** TTS 引擎：google / edge */
+	/** TTS 引擎：google / edge / windows */
 	ttsEngine: TtsEngine;
 	/** edge 引擎语音短名（如 ja-JP-NanamiNeural） */
 	ttsEdgeVoice: string;
+	/** windows 引擎语音描述（SAPI GetDescription()，如 Microsoft Haruka Desktop - Japanese） */
+	ttsWindowsVoice: string;
 	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
 	disableLexisPill: boolean;
 }
@@ -94,6 +98,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	ttsRate: 1.0,
 	ttsEngine: "google",
 	ttsEdgeVoice: "ja-JP-NanamiNeural",
+	ttsWindowsVoice: "",
 	disableLexisPill: false,
 };
 
@@ -429,7 +434,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 		const engineSetting = new Setting(containerEl)
 			.setName("朗读引擎")
-			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多。");
+			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多；Windows 调用系统自带朗读，离线可用（仅 Windows 桌面端）。");
 
 		// edge 语音选择（始终创建，按引擎显隐，避免切换时重渲染整个页面）
 		const edgeVoiceSetting = new Setting(containerEl)
@@ -470,22 +475,87 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			});
 		});
 
-		engineSetting.addDropdown((dropdown) => {
-			dropdown
-				.addOption("google", "Google Translate")
-				.addOption("edge", "Edge TTS")
-				.setValue(this.plugin.settings.ttsEngine)
-				.onChange(async (value) => {
-					const engine = value as TtsEngine;
-					this.plugin.settings.ttsEngine = engine;
+		// Windows 语音选择（仅 Windows 桌面端创建，按引擎显隐）
+		let windowsVoiceSetting: Setting | null = null;
+		if (isWindowsTTSAvailable()) {
+			windowsVoiceSetting = new Setting(containerEl)
+				.setName("Windows 语音")
+				.setDesc("选择 Windows 系统朗读的日文语音（来自系统已安装的语音包）。");
+			// 初始显隐：仅 windows 时显示
+			windowsVoiceSetting.settingEl.toggle(this.plugin.settings.ttsEngine === "windows");
+			windowsVoiceSetting.addDropdown(async (dropdown) => {
+				dropdown.addOption("", "加载中…");
+				dropdown.setValue("");
+				let voices;
+				try {
+					voices = await listWindowsVoices();
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					console.error("[nihong-ai-explain tts] listWindowsVoices 抛错:", e);
+					dropdown.selectEl.empty();
+					dropdown.addOption("", `加载失败：${msg}`);
+					dropdown.setValue("");
+					return;
+				}
+				dropdown.selectEl.empty();
+				if (voices.length === 0) {
+					dropdown.addOption("", "未检测到日语语音（请在系统安装日语语音包）");
+					dropdown.setValue("");
+					return;
+				}
+				for (const v of voices) {
+					dropdown.addOption(v.id, v.name);
+				}
+				const current = this.plugin.settings.ttsWindowsVoice;
+				if (!current || !voices.some((v) => v.id === current)) {
+					const fallback = voices[0].id;
+					this.plugin.settings.ttsWindowsVoice = fallback;
+					await this.plugin.saveSettings();
+				}
+				dropdown.setValue(this.plugin.settings.ttsWindowsVoice);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.ttsWindowsVoice = value;
 					await this.plugin.saveSettings();
 					setTTSConfig({
-						engine,
-						voice: this.plugin.settings.ttsEdgeVoice,
+						engine: this.plugin.settings.ttsEngine,
+						voice: value,
 						rate: this.plugin.settings.ttsRate,
 					});
-					// 仅切换 Edge 语音行的显隐，不重渲染整个页面
+				});
+			});
+		}
+
+		engineSetting.addDropdown(async (dropdown) => {
+			dropdown
+				.addOption("google", "Google Translate")
+				.addOption("edge", "Edge TTS");
+			// Windows 系统朗读仅在 Windows 桌面端可选
+			if (isWindowsTTSAvailable()) {
+				dropdown.addOption("windows", "Windows 系统朗读");
+			}
+			// 若当前值不可用（如移动端选中过 windows），回退到 google
+			let value = this.plugin.settings.ttsEngine;
+			if (value === "windows" && !isWindowsTTSAvailable()) {
+				value = "google";
+				this.plugin.settings.ttsEngine = "google";
+				await this.plugin.saveSettings();
+			}
+			dropdown.setValue(value)
+				.onChange(async (engineVal) => {
+					const engine = engineVal as TtsEngine;
+					this.plugin.settings.ttsEngine = engine;
+					await this.plugin.saveSettings();
+					// 切换引擎时，把对应引擎的语音下发给 TTS 配置
+					setTTSConfig({
+						engine,
+						voice: engine === "windows"
+							? this.plugin.settings.ttsWindowsVoice
+							: this.plugin.settings.ttsEdgeVoice,
+						rate: this.plugin.settings.ttsRate,
+					});
+					// 按 engine 切换两个语音行的显隐，不重渲染整个页面
 					edgeVoiceSetting.settingEl.toggle(engine === "edge");
+					windowsVoiceSetting?.settingEl.toggle(engine === "windows");
 				});
 		});
 

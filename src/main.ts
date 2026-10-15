@@ -48,7 +48,9 @@ export default class NihongAIExplainPlugin extends Plugin {
 		await this.loadSettings();
 		setTTSConfig({
 			engine: this.settings.ttsEngine,
-			voice: this.settings.ttsEdgeVoice,
+			voice: this.settings.ttsEngine === "windows"
+				? this.settings.ttsWindowsVoice
+				: this.settings.ttsEdgeVoice,
 			rate: this.settings.ttsRate,
 		});
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
