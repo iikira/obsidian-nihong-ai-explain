@@ -3,6 +3,7 @@ import { unzipSync } from "fflate";
 import { Notice, normalizePath, requestUrl, type App } from "obsidian";
 import { Deinflector } from "./deinflector";
 import { AccentDb } from "./accents";
+import { compareRevisions } from "./revision";
 import { ACCENTS_B64_GZ } from "./data/accentsData";
 import type {
 	DictionaryMeta,
@@ -39,6 +40,16 @@ const JITENDEX_RELEASES_API =
 	"https://api.github.com/repos/stephenmk/stephenmk.github.io/releases/latest";
 const JITENDEX_ZIP_NAME = "jitendex-yomitan.zip";
 
+/** Jitendex 安装/更新的阶段（供 UI 显示进度文案） */
+export type JitendexStage =
+	| "fetching"    // 拉取最新版本号 / 读取本地 zip 版本
+	| "downloading" // 下载 zip（最慢，几十 MB）
+	| "installing"  // 清空旧库 + 导入新数据
+	| "done";       // 完成
+
+/** 安装/更新进度回调：每个阶段切换时调用一次 */
+export type JitendexProgressCb = (stage: JitendexStage) => void;
+
 /** Jitendex 词典源元信息（供设置页展示与更新判断） */
 export interface JitendexSourceInfo {
 	/** 已导入词典的 revision（无导入则 null） */
@@ -58,6 +69,14 @@ export class DictionaryManager {
 	private app: App | null = null;
 	private pluginDir: string | null = null;
 	private accentDb: AccentDb = new AccentDb();
+	/** fetchLatestRevision 的会话内缓存值（null=未知或拉取失败）；命中缓存时不打 GitHub API */
+	private latestRevisionCache: string | null = null;
+	/** latestRevisionCache 的过期时间戳（ms）；过期后重新拉取。拉取失败则缩短缓存时间 */
+	private latestRevisionCacheExpire = 0;
+	/** latestRevision 缓存有效期（成功拉取后）：10 分钟 */
+	private static readonly LATEST_REV_TTL = 10 * 60 * 1000;
+	/** latestRevision 拉取失败后的重试间隔（失败也短暂缓存，避免短时反复撞限流）：1 分钟 */
+	private static readonly LATEST_REV_FAIL_TTL = 60 * 1000;
 
 	constructor() {
 		this.deinflector = new Deinflector();
@@ -246,8 +265,16 @@ export class DictionaryManager {
 		return zipPath;
 	}
 
-	/** GitHub releases/latest → tag_name；失败返回 null，不抛 */
+	/**
+	 * GitHub releases/latest → tag_name；失败返回 null，不抛。
+	 * 会话内缓存（成功 10 分钟、失败 1 分钟），避免频繁打开设置页 / 点更新时
+	 * 反复打 GitHub API 撞上未认证 60 次/小时/IP 限流。
+	 */
 	async fetchLatestRevision(): Promise<string | null> {
+		// 命中缓存（未过期）直接返回，不发请求
+		if (Date.now() < this.latestRevisionCacheExpire) {
+			return this.latestRevisionCache;
+		}
 		try {
 			const resp = await requestUrl({
 				url: JITENDEX_RELEASES_API,
@@ -256,15 +283,40 @@ export class DictionaryManager {
 				throw: false,
 			});
 			if (resp.status < 200 || resp.status >= 300) {
+				// 解析 GitHub 错误响应体，给出更具体的失败原因（如速率限制）
+				let detail = "";
+				try {
+					const body = resp.json as { message?: string } | null;
+					if (body?.message) {
+						detail = `: ${body.message}`;
+					}
+				} catch {
+					// 非 JSON 响应体，忽略
+				}
+				// 403 通常是未认证请求的速率限制（60 次/小时/IP）
+				const hint = resp.status === 403
+					? "（GitHub API 未认证请求限流 60 次/小时/IP，稍后重试或复用本地 zip）"
+					: "";
 				console.warn(
-					`[nihong-ai] 拉取 Jitendex 最新版本失败: HTTP ${resp.status}`,
+					`[nihong-ai] 拉取 Jitendex 最新版本失败: HTTP ${resp.status}${detail}${hint}`,
 				);
+				// 失败也短暂缓存 null，避免短时反复重试撞限流
+				this.latestRevisionCache = null;
+				this.latestRevisionCacheExpire =
+					Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
 				return null;
 			}
 			const tag = (resp.json as { tag_name?: string }).tag_name;
-			return typeof tag === "string" && tag ? tag : null;
+			const rev = typeof tag === "string" && tag ? tag : null;
+			this.latestRevisionCache = rev;
+			this.latestRevisionCacheExpire =
+				Date.now() + DictionaryManager.LATEST_REV_TTL;
+			return rev;
 		} catch (e) {
 			console.warn("[nihong-ai] 拉取 Jitendex 最新版本出错:", e);
+			this.latestRevisionCache = null;
+			this.latestRevisionCacheExpire =
+				Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
 			return null;
 		}
 	}
@@ -297,7 +349,10 @@ export class DictionaryManager {
 	 * 4. 清空旧 IndexedDB 数据，导入新 zip
 	 * 返回 { revision, updated }：updated=false 表示已是最新未变更，updated=true 表示重新导入完成
 	 */
-	async updateJitendex(): Promise<{ revision: string | null; updated: boolean }> {
+	async updateJitendex(
+		onProgress?: JitendexProgressCb,
+	): Promise<{ revision: string | null; updated: boolean }> {
+		onProgress?.("fetching");
 		const latest = await this.fetchLatestRevision();
 		// 已导入版本与最新一致 → 跳过
 		if (latest) {
@@ -307,7 +362,7 @@ export class DictionaryManager {
 			}
 		}
 		// 选择 zip 来源：本地 zip 版本与最新一致 → 复用，跳过下载；
-		// 最新版本拉取失败但本地 zip 存在 → 退而用本地 zip；否则下载。
+		// 最新版本拉取失败但本地 zip 存在 → 退而用本地 zip（需校验版本不比已导入的低）；否则下载。
 		let zipPath: string | null = this.jitendexZipPath();
 		const localRev = await this.readLocalZipRevision();
 		if (latest && localRev && localRev === latest) {
@@ -315,19 +370,31 @@ export class DictionaryManager {
 				`[nihong-ai] 本地 zip 版本 ${localRev} 与最新一致，跳过下载`,
 			);
 		} else if (!latest && localRev) {
+			// API 失败无法判断最新版，复用本地 zip 前先校验：本地 zip 版本不比已导入的低才装。
+			const installed =
+				(await this.getDictionaries())[0]?.revision ?? null;
+			if (installed && compareRevisions(localRev, installed) <= 0) {
+				console.log(
+					`[nihong-ai] 本地 zip 版本 ${localRev} 不高于已导入 ${installed}，跳过安装`,
+				);
+				return { revision: installed, updated: false };
+			}
 			console.log(
 				`[nihong-ai] 最新版本拉取失败，复用本地 zip 版本 ${localRev}`,
 			);
 		} else {
+			onProgress?.("downloading");
 			zipPath = await this.downloadJitendexZip();
 		}
 		if (!zipPath) {
 			throw new Error("无法获取词典 zip（插件目录未配置）");
 		}
+		onProgress?.("installing");
 		await this.clear();
 		const buf = await this.app!.vault.adapter.readBinary(zipPath);
 		await this.importFromZipBuffer(buf);
 		const dicts = await this.getDictionaries();
+		onProgress?.("done");
 		return { revision: dicts[0]?.revision ?? null, updated: true };
 	}
 

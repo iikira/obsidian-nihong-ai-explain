@@ -690,9 +690,23 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					}
 					const installing =
 						btn.buttonEl.textContent?.includes("安装") ?? false;
-					btn.setButtonText(installing ? "安装中…" : "更新中…").setDisabled(true);
+					// 各阶段对应的文案：更新到设置行描述（描述行更宽，
+					// 状态文本不会被截断；按钮在禁用态下文本显示不出来，故不更新按钮）
+					const stageText: Record<string, string> = {
+						fetching: "检测版本中…",
+						downloading: "下载词典中…",
+						installing: "安装词典中…",
+						done: "完成",
+					};
+					const setStage = (stage: string): void => {
+						jitendexSetting.setDesc(stageText[stage] ?? "处理中…");
+					};
+					setStage("fetching");
+					btn.setDisabled(true);
 					try {
-						const res = await mgr.updateJitendex();
+						const res = await mgr.updateJitendex((stage) => {
+							setStage(stage);
+						});
 						if (res.updated) {
 							new Notice(
 								`已${installing ? "安装" : "更新"}到 ${res.revision ?? "(未知版本)"}`,
@@ -944,8 +958,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				text.onChange(async (value) => {
 					g.apiUrl = value.trim();
 					await this.plugin.saveSettings();
-					// 地址变更后重新拉取模型列表
-					void this.refreshModelList(g);
 				});
 			});
 
@@ -991,8 +1003,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 				text.onChange(async (value) => {
 					g.apiKey = value;
 					await this.plugin.saveSettings();
-					// Key 变更后重新拉取模型列表（鉴权头变化）
-					void this.refreshModelList(g);
 				});
 			});
 	}
