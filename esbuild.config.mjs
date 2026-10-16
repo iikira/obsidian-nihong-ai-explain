@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import { cpSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { get } from "node:https";
 import { gzipSync } from "node:zlib";
 
@@ -159,12 +159,24 @@ const context = await esbuild.context({
 
 /** accentsData.ts 是否已存在（避免打包阶段重复生成） */
 const accentsDataExists = existsSync(ACCENTS_DATA_PATH);
+/** onecoreTtsB64.ts 是否需重新生成：不存在，或 exe 比它新（重新编译过 exe）才生成 */
+function onecoreB64Stale() {
+	if (!existsSync(ONECORE_B64_PATH)) {
+		return true;
+	}
+	if (!existsSync(TTS_EXE_SRC)) {
+		return false; // exe 不存在也无法生成，视为不 stale 避免反复警告
+	}
+	return statSync(TTS_EXE_SRC).mtimeMs > statSync(ONECORE_B64_PATH).mtimeMs;
+}
 
 if (prod) {
 	if (!accentsDataExists) {
 		await prepareAccents();
 	}
-	writeOnecoreB64Module();
+	if (onecoreB64Stale()) {
+		writeOnecoreB64Module();
+	}
 	await context.rebuild();
 	syncStaticAssets();
 	process.exit(0);
@@ -172,7 +184,9 @@ if (prod) {
 	if (!accentsDataExists) {
 		await prepareAccents();
 	}
-	writeOnecoreB64Module();
+	if (onecoreB64Stale()) {
+		writeOnecoreB64Module();
+	}
 	syncStaticAssets();
 	await context.watch();
 }
