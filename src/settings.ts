@@ -438,12 +438,12 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 		const engineSetting = new Setting(containerEl)
 			.setName("朗读引擎")
-			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多；Windows 调用系统自带朗读，离线可用（仅 Windows 桌面端）。");
+			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 暂不可用；Windows 调用系统自带朗读，离线可用（仅 Windows 桌面端）。");
 
 		// Google 自定义域名（仅 google 引擎显示）
 		const googleDomainSetting = new Setting(containerEl)
-			.setName("Google 域名")
-			.setDesc("Google TTS 的自定义域名（如 google-translate-vercel.roojay.com），留空用官方域名 translate.google.com。");
+			.setName("Google Translate 域名")
+			.setDesc("Google Translate 的自定义域名");
 		googleDomainSetting.settingEl.toggle(this.plugin.settings.ttsEngine === "google");
 		googleDomainSetting.addText((text) => {
 			text.setPlaceholder("translate.google.com")

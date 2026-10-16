@@ -6,7 +6,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 必须用 Windows runner：Windows OneCore 朗读依赖一个由 C# 源码
+    # （src/tts/onecore/OneCoreTts.cs）编译的 onecore_tts.exe，编译需要
+    # 系统 .NET Framework csc + Windows SDK WinMD 元数据（仅 Windows 自带）。
+    # esbuild 打包前会读取该 exe 做 base64 内嵌（esbuild.config.mjs 的
+    # writeOnecoreB64Module()），故 exe 必须先在本机从源码编译生成。
+    runs-on: windows-latest
     permissions:
       contents: write
       id-token: write
@@ -17,6 +22,9 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: "18.x"
+      - name: Build OneCore TTS exe
+        shell: pwsh
+        run: pwsh -File src/tts/onecore/build.ps1
       - name: Build plugin
         run: |
           npm install
