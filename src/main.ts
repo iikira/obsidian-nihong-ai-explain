@@ -52,6 +52,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 				? this.settings.ttsWindowsVoice
 				: this.settings.ttsEdgeVoice,
 			rate: this.settings.ttsRate,
+			googleDomain: this.settings.ttsGoogleDomain,
 		});
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 

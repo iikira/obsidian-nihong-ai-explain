@@ -34,12 +34,14 @@ export interface TtsConfig {
 	voice: string;
 	/** 朗读语速倍率（0.5–3.0，1.0=正常） */
 	rate: number;
+	/** google 引擎的自定义域名（如 google-translate-vercel.roojay.com），空=官方域名 translate.google.com */
+	googleDomain: string;
 }
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentToken = 0;
 /** 当前 TTS 配置（引擎/语音/语速） */
-let currentConfig: TtsConfig = { engine: "google", voice: "", rate: 1.0 };
+let currentConfig: TtsConfig = { engine: "google", voice: "", rate: 1.0, googleDomain: "" };
 const ttsCache = new Map<string, string>();
 
 function splitForTTS(text: string): string[] {
@@ -75,7 +77,13 @@ function splitForTTS(text: string): string[] {
 
 function buildTTSURL(text: string): string {
 	const q = encodeURIComponent(text);
-	return `https://translate.google.com/translate_tts?ie=UTF-8&q=${q}&tl=ja&client=tw-ob`;
+	// 自定义域名优先，去掉协议与末尾斜杠后拼接；空则用官方域名
+	let domain = (currentConfig.googleDomain || "").trim();
+	domain = domain.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+	if (!domain) {
+		domain = "translate.google.com";
+	}
+	return `https://${domain}/translate_tts?ie=UTF-8&q=${q}&tl=ja&client=tw-ob`;
 }
 
 function sleep(ms: number): Promise<void> {

@@ -69,6 +69,8 @@ export interface NihongAIExplainSettings {
 	ttsEdgeVoice: string;
 	/** windows 引擎语音 DisplayName（OneCore 自然语音，如 Microsoft Ayumi） */
 	ttsWindowsVoice: string;
+	/** google 引擎自定义域名（如 google-translate-vercel.roojay.com），空=官方域名 */
+	ttsGoogleDomain: string;
 	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
 	disableLexisPill: boolean;
 }
@@ -100,6 +102,7 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	ttsEngine: "google",
 	ttsEdgeVoice: "ja-JP-NanamiNeural",
 	ttsWindowsVoice: "",
+	ttsGoogleDomain: "",
 	disableLexisPill: false,
 };
 
@@ -437,6 +440,27 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			.setName("朗读引擎")
 			.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 音质更好、语音更多；Windows 调用系统自带朗读，离线可用（仅 Windows 桌面端）。");
 
+		// Google 自定义域名（仅 google 引擎显示）
+		const googleDomainSetting = new Setting(containerEl)
+			.setName("Google 域名")
+			.setDesc("Google TTS 的自定义域名（如 google-translate-vercel.roojay.com），留空用官方域名 translate.google.com。");
+		googleDomainSetting.settingEl.toggle(this.plugin.settings.ttsEngine === "google");
+		googleDomainSetting.addText((text) => {
+			text.setPlaceholder("translate.google.com")
+				.setValue(this.plugin.settings.ttsGoogleDomain)
+				.onChange(async (value) => {
+					const v = value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+					this.plugin.settings.ttsGoogleDomain = v;
+					await this.plugin.saveSettings();
+					setTTSConfig({
+						engine: this.plugin.settings.ttsEngine,
+						voice: this.plugin.settings.ttsEdgeVoice,
+						rate: this.plugin.settings.ttsRate,
+						googleDomain: v,
+					});
+				});
+		});
+
 		// edge 语音选择（始终创建，按引擎显隐，避免切换时重渲染整个页面）
 		const edgeVoiceSetting = new Setting(containerEl)
 			.setName("Edge 语音")
@@ -472,6 +496,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					engine: this.plugin.settings.ttsEngine,
 					voice: value,
 					rate: this.plugin.settings.ttsRate,
+					googleDomain: this.plugin.settings.ttsGoogleDomain,
 				});
 			});
 		});
@@ -521,6 +546,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						engine: this.plugin.settings.ttsEngine,
 						voice: value,
 						rate: this.plugin.settings.ttsRate,
+						googleDomain: this.plugin.settings.ttsGoogleDomain,
 					});
 				});
 			});
@@ -556,8 +582,10 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							? this.plugin.settings.ttsWindowsVoice
 							: this.plugin.settings.ttsEdgeVoice,
 						rate: this.plugin.settings.ttsRate,
+						googleDomain: this.plugin.settings.ttsGoogleDomain,
 					});
-					// 按 engine 切换两个语音行的显隐，不重渲染整个页面
+					// 按 engine 切换三个引擎相关行的显隐，不重渲染整个页面
+					googleDomainSetting.settingEl.toggle(engine === "google");
 					edgeVoiceSetting.settingEl.toggle(engine === "edge");
 					windowsVoiceSetting?.settingEl.toggle(engine === "windows");
 				});
@@ -582,6 +610,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 							engine: this.plugin.settings.ttsEngine,
 							voice: this.plugin.settings.ttsEdgeVoice,
 							rate: n,
+							googleDomain: this.plugin.settings.ttsGoogleDomain,
 						});
 					});
 			});
