@@ -6,6 +6,7 @@ import {
 } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { ModelGroup } from "./types";
+import { logWarn } from "../log";
 
 /**
  * 大模型分组编辑器（状态化）：封装原 SettingTab 的 5 个私有字段 + 5 个私有方法。
@@ -177,7 +178,7 @@ class ModelGroupEditor {
 		try {
 			const resp = await requestUrl({ url, method: "GET", headers, throw: false });
 			if (resp.status < 200 || resp.status >= 300) {
-				console.warn(`[nihong-ai] 拉取模型列表 HTTP ${resp.status}: ${url}`);
+				logWarn("settings", `拉取模型列表 HTTP ${resp.status}: ${url}`);
 				panel.setText(`拉取失败（HTTP ${resp.status}），可手动输入模型 id`);
 				return;
 			}
@@ -185,7 +186,7 @@ class ModelGroupEditor {
 			ids = data.map((m) => m.id).filter((x): x is string => !!x);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
-			console.warn(`[nihong-ai] 拉取模型列表失败: ${msg}`);
+			logWarn("settings", `拉取模型列表失败: ${msg}`);
 			panel.setText("拉取失败，可手动输入模型 id");
 			return;
 		}
@@ -240,7 +241,7 @@ class ModelGroupEditor {
 			(x) => x.id === plugin.settings.activeModelGroupId,
 		);
 		if (!g) {
-			host.createEl("div", {
+			host.createDiv({
 				text: "未选择分组",
 				cls: "nihong-ai-group-empty",
 			});

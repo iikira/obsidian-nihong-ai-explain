@@ -1,6 +1,7 @@
 import { Notice, normalizePath, type TFile, type Vault } from "obsidian";
 import { convertEpub } from "./index";
 import { ensureFolder } from "../utils";
+import { logError, errMsg } from "../log";
 
 export interface ConverterServiceOptions {
 	/** 读取当前 vault */
@@ -110,6 +111,6 @@ export class ConverterService {
 	private fail(prefix: string, e: unknown): void {
 		const msg = e instanceof Error ? e.message : String(e);
 		new Notice(`${prefix}: ${msg}`, 8000);
-		console.error(`[nihong-ai-explain] ${prefix}:`, e);
+		logError("converter", `${prefix}: ${errMsg(e)}`);
 	}
 }

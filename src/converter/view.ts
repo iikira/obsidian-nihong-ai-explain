@@ -56,7 +56,7 @@ export class EpubView extends FileView {
 		const title = el.createEl("h2", { cls: "nihong-ai-epub-title" });
 		title.setText(this.meta?.title || this.file?.basename || "epub 文档");
 		if (this.meta?.author) {
-			el.createEl("div", {
+			el.createDiv({
 				cls: "nihong-ai-epub-author",
 				text: `作者：${this.meta.author}`,
 			});

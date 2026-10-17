@@ -12,5 +12,5 @@ export interface SettingsContext {
 	plugin: NihongAIExplainPlugin;
 	app: App;
 	/** 重渲染整个设置树（等价于旧 SettingTab 的 this.update()） */
-	update(): void;
+	update: () => void;
 }

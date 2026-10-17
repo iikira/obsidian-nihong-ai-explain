@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 import { centerRect } from "../popupUtils";
 import { DictionaryManager } from "./manager";
 import { DictionaryPopup } from "./popup";
+import { logError, errMsg } from "../log";
 
 export interface LookupServiceOptions {
 	/** 获取词典管理器（未初始化时返回 null） */
@@ -70,7 +71,7 @@ export class LookupService {
 				const msg = e instanceof Error ? e.message : String(e);
 				const rectNow = this.opts.getSelectionRect() ?? rect;
 				this.popup.showError(`查询失败: ${msg}`, rectNow);
-				console.error("[nihong-ai-explain] 词典查询失败:", e);
+				logError("lookup", `词典查询失败: ${errMsg(e)}`);
 			}
 		} finally {
 			this.opts.finishTask("lookup", clean);
@@ -95,7 +96,7 @@ export class LookupService {
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
 			this.popup.showError(`查询失败: ${msg}`, rect);
-			console.error("[nihong-ai-explain] 词典交叉引用查询失败:", e);
+			logError("lookup", `词典交叉引用查询失败: ${errMsg(e)}`);
 		}
 	}
 }

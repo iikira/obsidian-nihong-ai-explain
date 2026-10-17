@@ -1,4 +1,5 @@
 import { Notice, requestUrl } from "obsidian";
+import { logInfo, logError, errMsg } from "../log";
 import { synthesizeEdge, formatEdgeRate } from "./edge";
 import {
 	synthesizeWindows,
@@ -149,37 +150,32 @@ export function getTTSCacheSize(): number {
 async function fetchTTSBlob(text: string): Promise<string> {
 	const cached = getCache(text);
 	if (cached !== null) {
-		console.log(
-			"[nihong-ai-explain tts] 缓存命中",
-			text.slice(0, 30),
-		);
+		logInfo("tts", `缓存命中 ${text.slice(0, 30)}`);
 		return cached;
 	}
 	const engine = currentConfig.engine;
 	let buf: ArrayBuffer;
 	if (engine === "edge") {
-		console.log("[nihong-ai-explain tts] edge 引擎请求", text.slice(0, 30));
+		logInfo("tts", `edge 引擎请求 ${text.slice(0, 30)}`);
 		buf = await synthesizeEdge(
 			text,
 			currentConfig.voice,
 			formatEdgeRate(currentConfig.rate),
 		);
 	} else if (engine === "windows") {
-		console.log("[nihong-ai-explain tts] windows 引擎请求", text.slice(0, 30));
+		logInfo("tts", `windows 引擎请求 ${text.slice(0, 30)}`);
 		buf = await synthesizeWindows(text, currentConfig.rate, currentConfig.voice);
 	} else {
 		const url = buildTTSURL(text);
-		console.log("[nihong-ai-explain tts] google 引擎请求 URL", url);
+		logInfo("tts", `google 引擎请求 URL ${url}`);
 		const resp = await requestUrl({
 			url,
 			method: "GET",
 			headers: TTS_HEADERS,
 		});
-		console.log(
-			"[nihong-ai-explain tts] google 响应 status=",
-			resp.status,
-			"byteLength=",
-			resp.arrayBuffer?.byteLength,
+		logInfo(
+			"nihong-ai-explain tts",
+			`google 响应 status=${resp.status} byteLength=${resp.arrayBuffer?.byteLength}`,
 		);
 		buf = resp.arrayBuffer;
 	}
@@ -238,16 +234,16 @@ export async function speakText(text: string): Promise<void> {
 		try {
 			blobUrl = await fetchTTSBlob(chunks[idx]);
 		} catch (err) {
-			console.error(
-				`[nihong-ai-explain tts] fetchTTSBlob 失败（第 ${idx + 1}/${chunks.length} 段）`,
-				err,
+			logError(
+				"nihong-ai-explain tts",
+				`fetchTTSBlob 失败（第 ${idx + 1}/${chunks.length} 段）: ${errMsg(err)}`,
 			);
 			if (token !== currentToken || failed) {
 				return;
 			}
 			failed = true;
-			const errMsg = err instanceof Error ? err.message : String(err);
-			new Notice(`朗读失败：${errMsg}`);
+			const noticeMsg = errMsg(err);
+			new Notice(`朗读失败：${noticeMsg}`);
 			return;
 		}
 		if (token !== currentToken || failed) {
@@ -271,7 +267,7 @@ export async function speakText(text: string): Promise<void> {
 		try {
 			await audio.play();
 		} catch (err) {
-			console.error("[nihong-ai-explain tts] audio.play() 失败", err);
+			logError("tts", `audio.play() 失败: ${errMsg(err)}`);
 			if (token !== currentToken || failed) {
 				return;
 			}
@@ -308,9 +304,9 @@ export async function speakText(text: string): Promise<void> {
 				resolve();
 			};
 			const onError = (): void => {
-				console.error(
-					"[nihong-ai-explain tts] audio error 事件",
-					audio.error,
+				logError(
+					"nihong-ai-explain tts",
+					`audio error 事件 code=${audio.error?.code}`,
 				);
 				cleanup();
 				if (token === currentToken && !failed) {

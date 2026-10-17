@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import { logWarn, errMsg } from "../log";
 
 /** 折叠状态在 localStorage 的 key（多 vault 隔离的 UI 偏好，不进 data.json 业务配置） */
 const SECTION_STATE_KEY = "nihong-ai-settings-section-state";
@@ -8,7 +9,7 @@ function readSectionState(app: App): Record<string, boolean> {
 	try {
 		return (app.loadLocalStorage(SECTION_STATE_KEY) as Record<string, boolean>) ?? {};
 	} catch (e) {
-		console.warn("[nihong-ai] 读取分区折叠状态失败:", e);
+		logWarn("settings", `读取分区折叠状态失败: ${errMsg(e)}`);
 		return {};
 	}
 }
@@ -20,7 +21,7 @@ function writeSectionState(app: App, title: string, open: boolean): void {
 	try {
 		app.saveLocalStorage(SECTION_STATE_KEY, state);
 	} catch (e) {
-		console.warn("[nihong-ai] 写入分区折叠状态失败:", e);
+		logWarn("settings", `写入分区折叠状态失败: ${errMsg(e)}`);
 	}
 }
 
@@ -54,14 +55,13 @@ export function createSettingsSection(
 		label.createSpan({ cls: "nihong-ai-settings-section-hint", text: desc });
 	}
 	const body = element.createDiv({ cls: "nihong-ai-settings-section-body" });
-	const details = element as HTMLDetailsElement;
 	// 初始展开状态：有历史记录用历史，否则用 open 默认值
 	const saved = app ? readSectionState(app)[title] : undefined;
-	details.open = saved !== undefined ? saved : open;
+	element.open = saved !== undefined ? saved : open;
 	// 切换时回写，保持下次进入时的状态
 	if (app) {
-		details.addEventListener("toggle", () => {
-			writeSectionState(app, title, details.open);
+		element.addEventListener("toggle", () => {
+			writeSectionState(app, title, element.open);
 		});
 	}
 	return body;

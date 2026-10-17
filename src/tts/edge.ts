@@ -7,6 +7,7 @@
  */
 
 import { Communicate } from "edge-tts-universal/browser";
+import { logWarn } from "../log";
 
 /** 默认日文语音（女声） */
 export const DEFAULT_EDGE_VOICE = "ja-JP-NanamiNeural";
@@ -28,15 +29,15 @@ export interface EdgeVoice {
  * 把统一语速 ttsRate（1.0=正常）转为 edge SSML 的 rate 百分比字符串。
  * 1.0 → "+0%"，2.0 → "+100%"，0.5 → "-50%"。
  * edge-tts-universal 接受百分比字符串或数字，这里统一用百分比字符串。
- * edge 的 rate 建议范围 [-50%, +100%]，超出 clamp 并 console.warn。
+ * edge 的 rate 建议范围 [-50%, +100%]，超出 clamp 并记录 warn 日志。
  */
 export function formatEdgeRate(ttsRate: number): string {
 	let pct = Math.round((ttsRate - 1) * 100);
 	if (pct < -50) {
-		console.warn(`[nihong-ai-explain tts] edge rate ${pct}% 低于 -50%，clamp 到 -50%`);
+		logWarn("tts", `edge rate ${pct}% 低于 -50%，clamp 到 -50%`);
 		pct = -50;
 	} else if (pct > 100) {
-		console.warn(`[nihong-ai-explain tts] edge rate ${pct}% 高于 100%，clamp 到 100%`);
+		logWarn("tts", `edge rate ${pct}% 高于 100%，clamp 到 100%`);
 		pct = 100;
 	}
 	return pct >= 0 ? `+${pct}%` : `${pct}%`;

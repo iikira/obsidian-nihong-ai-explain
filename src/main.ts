@@ -17,6 +17,8 @@ import { GrammarService } from "./grammar/service";
 import { LookupService } from "./dictionary/lookupService";
 import { ConverterService } from "./converter/service";
 import { EPUB_VIEW_TYPE, EpubView } from "./converter/view";
+import { LOG_VIEW_TYPE, LogPanelView } from "./log/view";
+import { logError, errMsg } from "./log";
 import { DictionaryManager } from "./dictionary/manager";
 import { getSelectionRect } from "./utils";
 import {
@@ -105,6 +107,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 			finishTask: (a, k) => this.finishTask(a, k),
 		});
 		this.registerEpubView();
+		this.registerLogView();
 
 		this.pill = new SelectionPill(this.buildPillActions());
 		this.pill.attach();
@@ -217,6 +220,14 @@ export default class NihongAIExplainPlugin extends Plugin {
 				void this.lookup(sel);
 			},
 		});
+
+		this.addCommand({
+			id: "open-log-panel",
+			name: "打开日志面板",
+			callback: () => {
+				void this.openLogView();
+			},
+		});
 	}
 
 	onunload(): void {
@@ -266,7 +277,31 @@ export default class NihongAIExplainPlugin extends Plugin {
 				`epub 视图注册失败，epub 转换功能不可用（不影响其他功能）: ${msg}`,
 				10000,
 			);
-			console.error("[nihong-ai-explain] epub 视图注册失败:", e);
+			logError("main", `epub 视图注册失败: ${errMsg(e)}`);
+		}
+	}
+
+	/**
+	 * 注册日志页签视图 + ribbon 图标。	 * ribbon 图标点击在右栏打开日志页签；命令「打开日志面板」同样打开。
+	 */
+	private registerLogView(): void {
+		this.registerView(LOG_VIEW_TYPE, (leaf) => new LogPanelView(leaf));
+		this.addRibbonIcon("scroll-text", "Nihong AI 日志", () => {
+			void this.openLogView();
+		});
+	}
+
+	/** 在右栏打开日志页签（已打开则聚焦） */
+	private async openLogView(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(LOG_VIEW_TYPE);
+		if (existing.length > 0) {
+			await this.app.workspace.revealLeaf(existing[0]);
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		await leaf?.setViewState({ type: LOG_VIEW_TYPE });
+		if (leaf) {
+			await this.app.workspace.revealLeaf(leaf);
 		}
 	}
 

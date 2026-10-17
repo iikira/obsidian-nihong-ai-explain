@@ -5,6 +5,7 @@ import { Deinflector } from "./deinflector";
 import { AccentDb } from "./accents";
 import { compareRevisions } from "./revision";
 import { ACCENTS_B64_GZ } from "./data/accentsData";
+import { logWarn, logError, errMsg } from "../log";
 import type {
 	DictionaryMeta,
 	LookupResult,
@@ -108,7 +109,7 @@ export class DictionaryManager {
 			await this.loadTags();
 			await this.loadAccents();
 		} catch (e) {
-			console.error("[nihong-ai] IndexedDB 初始化失败:", e);
+			logError("dict", `IndexedDB 初始化失败: ${errMsg(e)}`);
 		}
 	}
 
@@ -126,7 +127,7 @@ export class DictionaryManager {
 			const text = await decompressed.text();
 			this.accentDb.load(text);
 		} catch (e) {
-			console.warn("[nihong-ai] 加载声调索引失败:", e);
+			logWarn("dict", `加载声调索引失败: ${errMsg(e)}`);
 		}
 	}
 
@@ -259,9 +260,6 @@ export class DictionaryManager {
 			throw new Error(`下载失败: 响应体为空（HTTP ${resp.status}）`);
 		}
 		await adapter.writeBinary(zipPath, buf);
-		console.log(
-			`[nihong-ai] 已下载 Jitendex zip -> ${zipPath} (${buf.byteLength} 字节)`,
-		);
 		return zipPath;
 	}
 
@@ -297,8 +295,9 @@ export class DictionaryManager {
 				const hint = resp.status === 403
 					? "（GitHub API 未认证请求限流 60 次/小时/IP，稍后重试或复用本地 zip）"
 					: "";
-				console.warn(
-					`[nihong-ai] 拉取 Jitendex 最新版本失败: HTTP ${resp.status}${detail}${hint}`,
+				logWarn(
+					"nihong-ai",
+					`拉取 Jitendex 最新版本失败: HTTP ${resp.status}${detail}${hint}`,
 				);
 				// 失败也短暂缓存 null，避免短时反复重试撞限流
 				this.latestRevisionCache = null;
@@ -313,7 +312,7 @@ export class DictionaryManager {
 				Date.now() + DictionaryManager.LATEST_REV_TTL;
 			return rev;
 		} catch (e) {
-			console.warn("[nihong-ai] 拉取 Jitendex 最新版本出错:", e);
+			logWarn("dict", `拉取 Jitendex 最新版本出错: ${errMsg(e)}`);
 			this.latestRevisionCache = null;
 			this.latestRevisionCacheExpire =
 				Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
@@ -366,22 +365,14 @@ export class DictionaryManager {
 		let zipPath: string | null = this.jitendexZipPath();
 		const localRev = await this.readLocalZipRevision();
 		if (latest && localRev && localRev === latest) {
-			console.log(
-				`[nihong-ai] 本地 zip 版本 ${localRev} 与最新一致，跳过下载`,
-			);
+			// 本地 zip 版本与最新一致，跳过下载
 		} else if (!latest && localRev) {
 			// API 失败无法判断最新版，复用本地 zip 前先校验：本地 zip 版本不比已导入的低才装。
 			const installed =
 				(await this.getDictionaries())[0]?.revision ?? null;
 			if (installed && compareRevisions(localRev, installed) <= 0) {
-				console.log(
-					`[nihong-ai] 本地 zip 版本 ${localRev} 不高于已导入 ${installed}，跳过安装`,
-				);
 				return { revision: installed, updated: false };
 			}
-			console.log(
-				`[nihong-ai] 最新版本拉取失败，复用本地 zip 版本 ${localRev}`,
-			);
 		} else {
 			onProgress?.("downloading");
 			zipPath = await this.downloadJitendexZip();
@@ -425,7 +416,7 @@ export class DictionaryManager {
 			) as DictionaryMeta;
 			return meta.revision ?? null;
 		} catch (e) {
-			console.warn("[nihong-ai] 读取本地 zip 版本失败:", e);
+			logWarn("dict", `读取本地 zip 版本失败: ${errMsg(e)}`);
 			return null;
 		}
 	}
@@ -444,7 +435,7 @@ export class DictionaryManager {
 				const txt = new TextDecoder().decode(files[indexKey]);
 				meta = JSON.parse(txt) as DictionaryMeta;
 			} catch (e) {
-				throw new Error(`解析 index.json 失败: ${e}`);
+				throw new Error(`解析 index.json 失败: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 		if (!meta || !meta.title) {
@@ -484,7 +475,7 @@ export class DictionaryManager {
 				}
 				await tx.done;
 			} catch (e) {
-				console.warn(`[nihong-ai] 解析 ${key} 失败:`, e);
+				logWarn("dict", `解析 ${key} 失败: ${errMsg(e)}`);
 			}
 		}
 
@@ -511,7 +502,7 @@ export class DictionaryManager {
 				}
 				await tx.done;
 			} catch (e) {
-				console.warn(`[nihong-ai] 解析 ${key} 失败:`, e);
+				logWarn("dict", `解析 ${key} 失败: ${errMsg(e)}`);
 			}
 		}
 

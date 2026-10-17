@@ -8,6 +8,7 @@ import {
 	type UsageInfo,
 } from "../shared";
 import type { ModelGroup } from "../settings";
+import { logError, errMsg } from "../log";
 
 /** 语法拆解用到的设置项子集 */
 interface GrammarConfig {
@@ -97,7 +98,7 @@ export class GrammarService {
 			];
 
 			let content = "";
-			const logger = new CallLogger("nihong-ai-explain");
+			const logger = new CallLogger("llm");
 			try {
 				const res = await this.callModel(messages, group, logger);
 				content = res.content;
@@ -107,7 +108,7 @@ export class GrammarService {
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);
-				console.error("[nihong-ai-explain] 语法拆解失败:", e);
+				logError("grammar", `语法拆解失败: ${errMsg(e)}`);
 				logger.flush();
 				return;
 			}
@@ -122,7 +123,7 @@ export class GrammarService {
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`写入文件失败: ${msg}`, 8000);
-				console.error("[nihong-ai-explain] 写入失败:", e);
+				logError("grammar", `写入失败: ${errMsg(e)}`);
 				return;
 			}
 

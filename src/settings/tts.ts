@@ -1,5 +1,6 @@
 import { requestUrl, Setting, SliderComponent } from "obsidian";
 import type { SettingsContext } from "./context";
+import { logWarn, logError, errMsg } from "../log";
 import {
 	isWindowsTTSAvailable,
 	listWindowsVoices,
@@ -24,7 +25,7 @@ async function fetchEdgeVoices(): Promise<{ shortName: string; friendlyName: str
 	try {
 		const resp = await requestUrl({ url: VOICE_LIST_URL, method: "GET", throw: false });
 		if (resp.status < 200 || resp.status >= 300) {
-			console.warn("[nihong-ai] 拉取 edge 语音列表失败: HTTP", resp.status);
+			logWarn("settings", `拉取 edge 语音列表失败: HTTP ${resp.status}`);
 		} else {
 			const list = resp.json as Array<{
 				ShortName: string;
@@ -41,7 +42,7 @@ async function fetchEdgeVoices(): Promise<{ shortName: string; friendlyName: str
 			}
 		}
 	} catch (e) {
-		console.warn("[nihong-ai] 拉取 edge 语音列表出错:", e);
+		logWarn("settings", `拉取 edge 语音列表出错: ${errMsg(e)}`);
 	}
 	// 降级固定列表
 	edgeVoicesCache = [
@@ -182,7 +183,7 @@ export function renderTTSSection(ctx: SettingsContext, body: HTMLElement): void 
 				voices = await listWindowsVoices();
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
-				console.error("[nihong-ai-explain tts] listWindowsVoices 抛错:", e);
+				logError("settings", `listWindowsVoices 抛错: ${errMsg(e)}`);
 				dropdown.selectEl.empty();
 				dropdown.addOption("", `加载失败：${msg}`);
 				dropdown.setValue("");
@@ -225,7 +226,6 @@ export function renderTTSSection(ctx: SettingsContext, body: HTMLElement): void 
 			slider
 				.setLimits(0.5, 3.0, 0.1)
 				.setValue(plugin.settings.ttsRate)
-				.setDynamicTooltip()
 				.onChange(async (value) => {
 					// 步长 0.1 浮点累差容错：四舍五入到一位小数
 					const n = Math.round(value * 10) / 10;

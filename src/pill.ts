@@ -287,7 +287,7 @@ export class SelectionPill {
 			if (lePill.querySelector(`[${ACTION_ATTR}="${action.id}"]`)) {
 				continue; // 已注入
 			}
-			const btn = lePill.createEl("span", { cls: "lexis-sel-pill-btn" });
+			const btn = lePill.createSpan({ cls: "lexis-sel-pill-btn" });
 			btn.setAttribute(ACTION_ATTR, action.id);
 			if (action.icon) {
 				setIcon(btn, action.icon);
@@ -447,7 +447,7 @@ export class SelectionPill {
 		if (this.fallbackEl) {
 			return;
 		}
-		const div = document.body.createEl("div", {
+		const div = document.body.createDiv({
 			cls: "nihong-ai-pill",
 			attr: { id: FALLBACK_PILL_ID },
 		});

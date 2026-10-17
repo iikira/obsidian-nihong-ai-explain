@@ -36,7 +36,6 @@ test("Deinflector：ない形 → 辞书形", () => {
 test("Deinflector：变形候选带变形原因链", () => {
 	const d = new Deinflector();
 	const results = d.deinflect("食べません");
-	const hit = results.find((r) => r.term === "食べる");
 	// 至少有一条候选带变形原因
 	assert.ok(results.some((r) => r.reasons.length > 0));
 });

@@ -95,7 +95,7 @@ export class DictionaryPopup {
 		if (this.el) {
 			return;
 		}
-		const div = document.body.createEl("div", { cls: CARD_CLASS });
+		const div = document.body.createDiv({ cls: CARD_CLASS });
 		const fs = this.getFontSize?.() ?? 0;
 		if (fs > 0) {
 			div.setCssProps({ "--nihong-ai-dict-fs": `${fs}px` });
@@ -109,7 +109,7 @@ export class DictionaryPopup {
 			e.stopPropagation();
 			this.hide();
 		});
-		div.createEl("div", { cls: "nihong-ai-dict-body" });
+		div.createDiv({ cls: "nihong-ai-dict-body" });
 		this.el = div;
 	}
 
@@ -124,11 +124,11 @@ export class DictionaryPopup {
 		body.empty();
 		this.el.dataset.state = state;
 		if (state === "loading") {
-			body.createEl("div", { cls: "nihong-ai-spinner" });
-			const label = body.createEl("span");
+			body.createDiv({ cls: "nihong-ai-spinner" });
+			const label = body.createSpan();
 			label.textContent = content;
 		} else {
-			const msg = body.createEl("div", { cls: "nihong-ai-dict-message" });
+			const msg = body.createDiv({ cls: "nihong-ai-dict-message" });
 			msg.textContent = content;
 		}
 	}
@@ -166,13 +166,13 @@ export class DictionaryPopup {
 
 		for (const [key, groupTerms] of groups) {
 			const [expression, reading] = key.split("|");
-			const entryDiv = body.createEl("div", { cls: "nihong-ai-dict-entry" });
+			const entryDiv = body.createDiv({ cls: "nihong-ai-dict-entry" });
 
 			// 振假名 header
-			const header = entryDiv.createEl("div", { cls: "nihong-ai-dict-header" });
+			const header = entryDiv.createDiv({ cls: "nihong-ai-dict-header" });
 			if (expression !== reading) {
 				const segments = getFuriganaSegments(expression, reading);
-				const wrapper = header.createEl("span", { cls: "nihong-ai-dict-furigana" });
+				const wrapper = header.createSpan({ cls: "nihong-ai-dict-furigana" });
 				// 每个 segment 用独立 <ruby> 包裹：base 文本 + <rt>（有 reading 时）。
 				// 单 <ruby> 多 segment 时，<rt> 会注在其前所有 base 上方（错位），
 				// 故每 segment 独立 <ruby> 保证 base 与假名一一配对对齐。
@@ -183,21 +183,21 @@ export class DictionaryPopup {
 					rt.textContent = seg.reading;
 				}
 			} else {
-				const span = header.createEl("span", { cls: "nihong-ai-dict-furigana" });
+				const span = header.createSpan({ cls: "nihong-ai-dict-furigana" });
 				span.textContent = expression;
 			}
 
 			// 变形原因
 			const first = groupTerms[0];
 			if (first.deinflectionReasons && first.deinflectionReasons.length > 0) {
-				const reason = header.createEl("span", { cls: "nihong-ai-dict-reason" });
+				const reason = header.createSpan({ cls: "nihong-ai-dict-reason" });
 				reason.textContent = ` ← ${first.deinflectionReasons.join(" ← ")}`;
 			}
 
 			// 声调（pitch accent）：圆圈数字标记，多个候选用逗号分隔
 			const accents = this.getAccents?.(expression, reading);
 			if (accents && accents.length > 0) {
-				const accentSpan = header.createEl("span", { cls: "nihong-ai-dict-accent" });
+				const accentSpan = header.createSpan({ cls: "nihong-ai-dict-accent" });
 				accentSpan.textContent = accents
 					.map((p) => toAccentCircle(p))
 					.join(",");
@@ -211,12 +211,12 @@ export class DictionaryPopup {
 
 				// 词性标签
 				if (term.tags.length > 0) {
-					const tagSpan = li.createEl("span", { cls: "nihong-ai-dict-tags" });
+					const tagSpan = li.createSpan({ cls: "nihong-ai-dict-tags" });
 					for (const t of term.tags) {
 						if (!t) {
 							continue;
 						}
-						const tag = tagSpan.createEl("span", { cls: "nihong-ai-dict-tag" });
+						const tag = tagSpan.createSpan({ cls: "nihong-ai-dict-tag" });
 						tag.textContent = t;
 						const tagDef = this.getTag(t);
 						if (tagDef) {
@@ -226,7 +226,7 @@ export class DictionaryPopup {
 				}
 
 				// 释义内容
-				const glossDiv = li.createEl("div", { cls: "nihong-ai-dict-glossary" });
+				const glossDiv = li.createDiv({ cls: "nihong-ai-dict-glossary" });
 				for (const g of term.glossary) {
 					this.renderContentNode(glossDiv, g as ContentNode);
 				}
@@ -239,7 +239,7 @@ export class DictionaryPopup {
 			return;
 		}
 		if (typeof node === "string") {
-			const span = container.createEl("span");
+			const span = container.createSpan();
 			span.textContent = node;
 			return;
 		}
@@ -255,7 +255,9 @@ export class DictionaryPopup {
 		}
 		if ("tag" in node) {
 			const content = node;
-			const el = document.createElement(content.tag);
+			// createEl 的 tag 参数需 keyof HTMLElementTagNameMap；Yomitan 结构化内容的 tag
+			// 是运行时 string，强转后由 createEl 创建并附加到 container（无需再 appendChild）
+			const el = container.createEl(content.tag as keyof HTMLElementTagNameMap);
 			if (content.data) {
 				for (const [k, v] of Object.entries(content.data)) {
 					if (k === "class") {
@@ -277,7 +279,6 @@ export class DictionaryPopup {
 			if (content.content !== undefined) {
 				this.renderContentNode(el, content.content);
 			}
-			container.appendChild(el);
 			return;
 		}
 		if (!("type" in node)) {
@@ -286,7 +287,7 @@ export class DictionaryPopup {
 		const t = node;
 		switch (t.type) {
 			case "text": {
-				const span = container.createEl("span");
+				const span = container.createSpan();
 				span.textContent = t.text;
 				break;
 			}
@@ -304,7 +305,7 @@ export class DictionaryPopup {
 					a.textContent = t.text;
 				}
 				if (t.content !== undefined) {
-					this.renderContentNode(a, t.content as ContentNode);
+					this.renderContentNode(a, t.content);
 				}
 				break;
 			}
@@ -326,26 +327,26 @@ export class DictionaryPopup {
 			case "quote": {
 				const q = container.createEl("blockquote", { cls: "nihong-ai-dict-quote" });
 				if (t.content !== undefined) {
-					this.renderContentNode(q, t.content as ContentNode);
+					this.renderContentNode(q, t.content);
 				}
 				break;
 			}
 			case "footnote": {
 				const fn = container.createEl("aside", { cls: "nihong-ai-dict-footnote" });
 				if (t.reference) {
-					fn.createEl("span", {
+					fn.createSpan({
 						cls: "nihong-ai-dict-footnote-ref",
 						text: t.reference,
 					});
 				}
 				if (t.content !== undefined) {
-					this.renderContentNode(fn, t.content as ContentNode);
+					this.renderContentNode(fn, t.content);
 				}
 				break;
 			}
 			case "deinflection": {
 				if (t.variant) {
-					container.createEl("span", {
+					container.createSpan({
 						cls: "nihong-ai-dict-deinflection",
 						text: t.variant,
 					});
@@ -448,7 +449,7 @@ export class DictionaryPopup {
 
 	private fragmentToText(fragment: DocumentFragment): string {
 		// 用 innerText 取视觉换行（尊重 block 元素），fallback 到 textContent
-		const div = document.createElement("div");
+		const div = createDiv();
 		div.appendChild(fragment);
 		return div.innerText || div.textContent || "";
 	}

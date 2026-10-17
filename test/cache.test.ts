@@ -12,7 +12,7 @@ beforeEach(() => {
 			cb();
 			return 0 as number;
 		}) as unknown as typeof window.setTimeout,
-		clearTimeout: (() => {}) as unknown as typeof window.clearTimeout,
+		clearTimeout: () => {},
 	} as typeof globalThis.window;
 });
 afterEach(() => {
@@ -28,7 +28,7 @@ function makeMemoryStorage(): { store: Map<string, unknown>; adapter: CacheStora
 	const store = new Map<string, unknown>();
 	const adapter: CacheStorage = {
 		load: <T>(key: string): T | null => (store.has(key) ? (store.get(key) as T) : null),
-		save: (key: string, data: unknown | null) => {
+		save: (key: string, data: unknown) => {
 			if (data === null) {
 				store.delete(key);
 			} else {

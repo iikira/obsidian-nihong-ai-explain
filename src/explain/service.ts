@@ -10,6 +10,7 @@ import {
 import { toAccentCircle, renderTermEntry } from "./renderTerm";
 import type { ModelGroup } from "../settings";
 import type { LookupResult } from "../dictionary/types";
+import { logWarn, logError, logInfo, errMsg } from "../log";
 
 /** 讲解用到的设置项子集 */
 interface ExplainConfig {
@@ -84,7 +85,7 @@ export class ExplainService {
 		try {
 			results = await this.opts.lookup(word);
 		} catch (e) {
-			console.warn("[nihong-ai-explain] 词典查询失败:", e);
+			logWarn("explain", `词典查询失败: ${errMsg(e)}`);
 			return "";
 		}
 		if (results.length === 0) {
@@ -169,7 +170,7 @@ export class ExplainService {
 				userContent = `请讲解以下日语单词：${clean}`;
 			}
 
-			console.log("[nihong-ai-explain] 用户提示词:\n" + userContent);
+			logInfo("explain", `用户提示词:\n${userContent}`);
 
 			const messages: ChatMessage[] = [
 				{ role: "system", content: EXPLAIN_SYSTEM_PROMPT },
@@ -177,7 +178,7 @@ export class ExplainService {
 			];
 
 			let content = "";
-			const logger = new CallLogger("nihong-ai-explain");
+			const logger = new CallLogger("llm");
 			try {
 				const res = await this.callModel(messages, group, logger);
 				content = res.content;
@@ -187,7 +188,7 @@ export class ExplainService {
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);
-				console.error("[nihong-ai-explain] 生成失败:", e);
+				logError("explain", `生成失败: ${errMsg(e)}`);
 				logger.flush();
 				return;
 			}
@@ -202,7 +203,7 @@ export class ExplainService {
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`写入文件失败: ${msg}`, 8000);
-				console.error("[nihong-ai-explain] 写入失败:", e);
+				logError("explain", `写入失败: ${errMsg(e)}`);
 				return;
 			}
 

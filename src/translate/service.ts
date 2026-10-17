@@ -4,6 +4,7 @@ import { LRUTranslateCache, AppStorageAdapter } from "./cache";
 import { TRANSLATE_SYSTEM_PROMPT } from "../prompts";
 import { centerRect } from "../popupUtils";
 import type { ModelGroup } from "../settings";
+import { logInfo, logError, errMsg } from "../log";
 import {
 	CallLogger,
 	callChatCompletion,
@@ -91,7 +92,7 @@ export class TranslateService {
 			if (cached != null) {
 				this.card.showResult(cached, rect);
 				// LRU 缓存命中：无 API 调用，无 token 用量
-				console.log("[nihong-ai-explain] 翻译 LRU 缓存命中，无 API 调用");
+				logInfo("translate", "翻译 LRU 缓存命中，无 API 调用");
 				return;
 			}
 
@@ -105,7 +106,7 @@ export class TranslateService {
 				{ role: "user", content: clean },
 			];
 
-			const logger = new CallLogger("nihong-ai-explain");
+			const logger = new CallLogger("llm");
 			try {
 				const { content: result, usage } = await this.callModel(
 					messages,
@@ -123,7 +124,7 @@ export class TranslateService {
 				const msg = e instanceof Error ? e.message : String(e);
 				const rectNow = this.opts.getSelectionRect() ?? rect;
 				this.card.showError(`翻译失败: ${msg}`, rectNow);
-				console.error("[nihong-ai-explain] 翻译失败:", e);
+				logError("translate", `翻译失败: ${errMsg(e)}`);
 			} finally {
 				logger.flush();
 			}

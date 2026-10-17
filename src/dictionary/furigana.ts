@@ -3,20 +3,10 @@ export interface FuriganaSegment {
 	reading: string;
 }
 
-const HIRAGANA_START = 0x3040;
-const HIRAGANA_END = 0x309f;
 const KATAKANA_START = 0x30a0;
 const KATAKANA_END = 0x30ff;
 const KANJI_START = 0x4e00;
 const KANJI_END = 0x9faf;
-
-function isKana(char: string): boolean {
-	const code = char.codePointAt(0) ?? 0;
-	return (
-		(code >= HIRAGANA_START && code <= HIRAGANA_END) ||
-		(code >= KATAKANA_START && code <= KATAKANA_END)
-	);
-}
 
 function isKanji(char: string): boolean {
 	const code = char.codePointAt(0) ?? 0;

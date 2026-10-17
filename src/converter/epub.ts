@@ -11,18 +11,6 @@ function parseXml(xml: string): Element {
 	return doc.documentElement;
 }
 
-/** 定位某个属性值（兼容 XML 命名空间前缀，如 dc:title / package） */
-function attr(el: Element, name: string): string | undefined {
-	return el.getAttribute(name) ?? undefined;
-}
-
-/** 收集某元素的直接子元素中，本地名匹配 name 的元素（忽略命名空间前缀） */
-function childrenByName(el: Element, name: string): Element[] {
-	return Array.from(el.children).filter(
-		(c) => c.localName === name,
-	);
-}
-
 /** 读取容器信息：返回 OPF 路径（相对 epub 根）及其所在目录 */
 function parseContainer(zip: Record<string, Uint8Array>): {
 	opfPath: string;

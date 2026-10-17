@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import { logWarn, errMsg } from "../log";
 
 const STORAGE_KEY = "nihong-ai-translate-cache";
 const CAPACITY = 1024;
@@ -13,7 +14,7 @@ export interface CacheStorage {
 	/** 读取 key 对应的值（已反序列化为对象）；无值返回 null */
 	load<T>(key: string): T | null;
 	/** 保存值（data=null 表示清除） */
-	save(key: string, data: unknown | null): void;
+	save(key: string, data: unknown): void;
 }
 
 /** 走 Obsidian App 的 vault 级存储适配器（多 vault 隔离，替代直接用 localStorage） */
@@ -22,7 +23,7 @@ export class AppStorageAdapter implements CacheStorage {
 	load<T>(key: string): T | null {
 		return this.app.loadLocalStorage(key) as T | null;
 	}
-	save(key: string, data: unknown | null): void {
+	save(key: string, data: unknown): void {
 		this.app.saveLocalStorage(key, data);
 	}
 }
@@ -59,7 +60,7 @@ export class LRUTranslateCache {
 				}
 			}
 		} catch (e) {
-			console.warn("[nihong-ai] 翻译缓存加载失败:", e);
+			logWarn("translate", `翻译缓存加载失败: ${errMsg(e)}`);
 		}
 	}
 
@@ -101,7 +102,7 @@ export class LRUTranslateCache {
 			try {
 				this.storage.save(STORAGE_KEY, null);
 			} catch (e) {
-				console.warn("[nihong-ai] 清空翻译缓存失败:", e);
+				logWarn("translate", `清空翻译缓存失败: ${errMsg(e)}`);
 			}
 		}
 	}
@@ -137,7 +138,7 @@ export class LRUTranslateCache {
 			const entries = [...this.map.entries()];
 			this.storage.save(STORAGE_KEY, entries);
 		} catch (e) {
-			console.warn("[nihong-ai] 翻译缓存写入失败:", e);
+			logWarn("translate", `翻译缓存写入失败: ${errMsg(e)}`);
 		}
 	}
 }

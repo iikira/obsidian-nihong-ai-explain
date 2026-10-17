@@ -47,7 +47,7 @@ export class TranslateCard {
 		if (this.el) {
 			return;
 		}
-		const div = document.body.createEl("div", { cls: CARD_CLASS });
+		const div = document.body.createDiv({ cls: CARD_CLASS });
 		div.setCssStyles({ display: "none" });
 		const close = div.createEl("button", { cls: "nihong-ai-translate-close" });
 		close.textContent = "×";
@@ -57,7 +57,7 @@ export class TranslateCard {
 			e.stopPropagation();
 			this.hide();
 		});
-		div.createEl("div", { cls: "nihong-ai-translate-body" });
+		div.createDiv({ cls: "nihong-ai-translate-body" });
 		// 点击卡片外部关闭
 		const onDocClick = (e: MouseEvent): void => {
 			if (e.target instanceof Element && e.target.closest(`.${CARD_CLASS}`)) {
@@ -81,11 +81,11 @@ export class TranslateCard {
 		body.empty();
 		this.el.dataset.state = state;
 		if (state === "loading") {
-			body.createEl("div", { cls: "nihong-ai-spinner" });
-			const label = body.createEl("span");
+			body.createDiv({ cls: "nihong-ai-spinner" });
+			const label = body.createSpan();
 			label.textContent = content;
 		} else {
-			const pre = body.createEl("div", { cls: "nihong-ai-translate-text" });
+			const pre = body.createDiv({ cls: "nihong-ai-translate-text" });
 			pre.textContent = content;
 		}
 	}

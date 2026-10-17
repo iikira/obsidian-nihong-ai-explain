@@ -19,6 +19,7 @@
  */
 
 import { ONECORE_TTS_B64 } from "./onecore/onecoreTtsB64";
+import { logWarn, errMsg } from "../log";
 
 // 仅桌面端 Electron 环境有 window.require，用动态 require 拿 child_process / fs / os / path
 // （esbuild platform:browser 不会打包这些 require，故必须走 window.require 属性访问绕过打包器）。
@@ -31,18 +32,18 @@ interface ElectronGlobal {
 
 /** require 返回的 Node 模块极小形状：带若干属性/方法，访问前都做 typeof 运行时检查 */
 interface NodeModuleLike {
-	[key: string]: ((...args: never[]) => unknown) | unknown;
+	[key: string]: unknown;
 }
 
 /** Electron 全局对象（window.require / window.process） */
-const electron: ElectronGlobal = (window as unknown as ElectronGlobal);
+const electron: ElectronGlobal = window;
 
 /** require 拿到的 fs 模块极小接口（仅用到的方法） */
 interface FsModule {
 	writeFileSync(path: string, data: Uint8Array): void;
 	readFile(
 		path: string,
-		cb: (err: Error | null, data: Buffer) => void,
+		cb: (err: Error | null, data: Uint8Array) => void,
 	): void;
 }
 
@@ -122,14 +123,14 @@ function ensureTtsExe(): string | null {
 		return ttsExePath;
 	}
 	if (!ONECORE_TTS_B64) {
-		console.warn("[nihong-ai-explain tts] 内嵌的 onecore_tts.exe 数据为空，无法释放");
+		logWarn("tts", "内嵌的 onecore_tts.exe 数据为空，无法释放");
 		return null;
 	}
 	const fs = getFs();
 	const os = getOs();
 	const path = getPath();
 	if (!fs || !os || !path) {
-		console.warn("[nihong-ai-explain tts] fs/os/path 不可用，无法释放 onecore_tts.exe");
+		logWarn("tts", "fs/os/path 不可用，无法释放 onecore_tts.exe");
 		return null;
 	}
 	try {
@@ -144,7 +145,7 @@ function ensureTtsExe(): string | null {
 		ttsExePath = exe;
 		return exe;
 	} catch (e) {
-		console.warn("[nihong-ai-explain tts] 释放 onecore_tts.exe 失败:", e);
+		logWarn("tts", `释放 onecore_tts.exe 失败: ${errMsg(e)}`);
 		return null;
 	}
 }
@@ -203,7 +204,7 @@ export async function probeWindowsTTSOnce(): Promise<boolean> {
 		}
 	});
 	if (!windowsProbe) {
-		console.warn("[nihong-ai-explain tts] onecore_tts.exe 执行失败，Windows 系统朗读不可用");
+		logWarn("tts", "onecore_tts.exe 执行失败，Windows 系统朗读不可用");
 	}
 	return windowsProbe;
 }
@@ -266,7 +267,7 @@ export async function listWindowsVoices(): Promise<WindowsVoice[]> {
 			{ timeout: 15000, windowsHide: true },
 			(err, stdout) => {
 				if (err) {
-					console.warn("[nihong-ai-explain tts] 枚举 Windows 语音失败:", err.message);
+				logWarn("tts", `枚举 Windows 语音失败: ${err.message}`);
 					windowsProbe = false;
 					resolve([]);
 					return;
@@ -374,7 +375,7 @@ export async function synthesizeWindows(
 						reject(new Error("读取 OneCore 音频失败：fs 不可用"));
 						return;
 					}
-					fs.readFile(wavMatch[1], (ferr: Error | null, data: Buffer) => {
+					fs.readFile(wavMatch[1], (ferr: Error | null, data: Uint8Array) => {
 						if (ferr) {
 							reject(new Error(`读取 OneCore 音频失败: ${ferr.message}`));
 							return;

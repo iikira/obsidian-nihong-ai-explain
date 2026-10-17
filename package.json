@@ -9,7 +9,9 @@
 		"prepare-accents": "node esbuild.config.mjs --prepare-accents",
 		"build": "npm run prepare-accents && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"typecheck": "npm run prepare-accents && tsc -noEmit -skipLibCheck",
-		"test": "node test/build.mjs && node --test test-dist/*.test.cjs"
+		"test": "node test/build.mjs && node --test test-dist/*.test.cjs",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix"
 	},
 	"keywords": [
 		"obsidian",
@@ -27,6 +29,8 @@
 	"devDependencies": {
 		"@types/node": "^20.11.0",
 		"esbuild": "^0.20.2",
+		"eslint": "^10.13.0",
+		"eslint-plugin-obsidianmd": "^0.4.2",
 		"obsidian": "^1.5.7",
 		"typescript": "^5.4.0"
 	}
