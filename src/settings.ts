@@ -49,12 +49,12 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			update: () => this.update(),
 		};
 
-		renderOutputDirSection(ctx, createSettingsSection(root, "输出目录"));
-		renderModelGroupSection(ctx, createSettingsSection(root, "大模型分组"));
-		renderSamplingSection(ctx, createSettingsSection(root, "采样参数"));
-		renderDictionarySection(ctx, createSettingsSection(root, "词典与显示"));
-		renderTTSSection(ctx, createSettingsSection(root, "朗读"));
-		renderCacheSection(ctx, createSettingsSection(root, "缓存管理"));
-		renderOfflineDictSection(ctx, createSettingsSection(root, "离线词典"));
+		renderOutputDirSection(ctx, createSettingsSection(root, "输出目录", { app: ctx.app }));
+		renderModelGroupSection(ctx, createSettingsSection(root, "大模型分组", { app: ctx.app }));
+		renderSamplingSection(ctx, createSettingsSection(root, "采样参数", { app: ctx.app, open: false }));
+		renderDictionarySection(ctx, createSettingsSection(root, "词典与显示", { app: ctx.app }));
+		renderTTSSection(ctx, createSettingsSection(root, "朗读", { app: ctx.app }));
+		renderCacheSection(ctx, createSettingsSection(root, "缓存管理", { app: ctx.app, open: false }));
+		renderOfflineDictSection(ctx, createSettingsSection(root, "离线词典", { app: ctx.app }));
 	}
 }
