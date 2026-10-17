@@ -259,12 +259,12 @@
 .nihong-ai-dict-sense-group,
 .nihong-ai-dict-sense,
 .nihong-ai-dict-glossary,
-.nihong-ai-dict-extra-info,
-.nihong-ai-dict-attribution {
+.nihong-ai-dict-extra-info {
 	margin: 2px 0;
 }
 
 .nihong-ai-dict-attribution {
+	margin: 2px 0;
 	font-size: 0.79em;
 	color: var(--text-faint);
 }
@@ -300,11 +300,6 @@
 }
 
 /* ====== 大模型分组管理 ====== */
-
-/* 分组编辑区容器：强制块级，避免继承所在设置行的 flex 布局把子设置行压成一行 */
-.nihong-ai-active-group {
-	display: block;
-}
 
 /* 字段行（标题/API地址/模型id/APIKey）：统一紧凑 padding */
 .nihong-ai-group-header,
@@ -368,8 +363,9 @@
 	flex: 0 0 auto;
 }
 
-/* 分组编辑区容器：左侧缩进强调"属于当前分组" */
+/* 分组编辑区容器：强制块级（脱离所在设置行的 flex 布局），左侧缩进强调"属于当前分组" */
 .nihong-ai-active-group {
+	display: block;
 	margin-top: 8px;
 	padding-left: 12px;
 	border-left: 2px solid var(--background-modifier-border);
@@ -476,12 +472,10 @@
 
 
 /* ====== 可折叠设置分区（参考 lexis）====== */
-/* 根容器：块级全宽，承载各分区垂直堆叠（脱离所在 setting-item 的 flex 布局）。
- * 显式透明背景，避免继承所在设置行/页面的背景色（用户要求分区只保留边框、去掉背景）。 */
+/* 根容器：块级全宽，承载各分区垂直堆叠（脱离所在 setting-item 的 flex 布局） */
 .nihong-ai-settings-root {
 	display: block;
 	width: 100%;
-	background: transparent;
 }
 .nihong-ai-settings-section {
 	margin: 10px 0;
@@ -489,7 +483,6 @@
 	border-radius: 8px;
 	padding: 0 12px;
 	min-width: 0;
-	background: transparent;
 }
 .nihong-ai-settings-section > .nihong-ai-settings-section-heading {
 	display: grid;
