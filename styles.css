@@ -301,6 +301,11 @@
 
 /* ====== 大模型分组管理 ====== */
 
+/* 分组编辑区容器：强制块级，避免继承所在设置行的 flex 布局把子设置行压成一行 */
+.nihong-ai-active-group {
+	display: block;
+}
+
 /* 字段行（标题/API地址/模型id/APIKey）：统一紧凑 padding */
 .nihong-ai-group-header,
 .nihong-ai-group-field {
