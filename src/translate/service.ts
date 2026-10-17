@@ -1,6 +1,6 @@
-import { Notice } from "obsidian";
+import { Notice, type App } from "obsidian";
 import { TranslateCard } from "./card";
-import { LRUTranslateCache } from "./cache";
+import { LRUTranslateCache, AppStorageAdapter } from "./cache";
 import { TRANSLATE_SYSTEM_PROMPT } from "../prompts";
 import { centerRect } from "../popupUtils";
 import type { ModelGroup } from "../settings";
@@ -29,6 +29,8 @@ export interface TranslateServiceOptions {
 	finishTask: (actionId: string, text: string) => void;
 	/** 读取当前选区位置 */
 	getSelectionRect: () => DOMRect | null;
+	/** 拿 Obsidian App（供翻译缓存走 App vault 级存储，多 vault 隔离） */
+	getApp: () => App;
 }
 
 /** 翻译服务：封装翻译网络调用、缓存与 UI 编排。 */
@@ -40,6 +42,7 @@ export class TranslateService {
 	constructor(opts: TranslateServiceOptions) {
 		this.opts = opts;
 		this.cache = new LRUTranslateCache();
+		this.cache.setStorage(new AppStorageAdapter(opts.getApp()));
 		this.cache.load();
 		this.card = new TranslateCard();
 	}

@@ -29,7 +29,7 @@ function inHost(node: Node | null): boolean {
 	if (!el) {
 		return false;
 	}
-	return SELECTOR_HOSTS.some((sel) => el!.closest(sel) != null);
+	return SELECTOR_HOSTS.some((sel) => el.closest(sel) != null);
 }
 
 export interface PillAction {
@@ -287,8 +287,7 @@ export class SelectionPill {
 			if (lePill.querySelector(`[${ACTION_ATTR}="${action.id}"]`)) {
 				continue; // 已注入
 			}
-			const btn = document.createElement("span");
-			btn.className = "lexis-sel-pill-btn";
+			const btn = lePill.createEl("span", { cls: "lexis-sel-pill-btn" });
 			btn.setAttribute(ACTION_ATTR, action.id);
 			if (action.icon) {
 				setIcon(btn, action.icon);
@@ -312,7 +311,6 @@ export class SelectionPill {
 					this.markBusy(btn, false);
 				});
 			});
-			lePill.appendChild(btn);
 		}
 
 		// 注入新按钮后 pill 变宽，lexis 用旧宽度算的 left 已失效，重新定位防出屏
@@ -449,15 +447,15 @@ export class SelectionPill {
 		if (this.fallbackEl) {
 			return;
 		}
-		const div = document.createElement("div");
-		div.id = FALLBACK_PILL_ID;
-		div.className = "nihong-ai-pill";
+		const div = document.body.createEl("div", {
+			cls: "nihong-ai-pill",
+			attr: { id: FALLBACK_PILL_ID },
+		});
 		div.setCssStyles({ display: "none" });
 		// 防止点击 pill 时选区收起
 		div.addEventListener("mousedown", (ev) => ev.preventDefault());
 		for (const action of this.actions) {
-			const btn = document.createElement("button");
-			btn.className = "nihong-ai-pill-btn";
+			const btn = div.createEl("button", { cls: "nihong-ai-pill-btn" });
 			if (action.icon) {
 				setIcon(btn, action.icon);
 			} else {
@@ -481,9 +479,7 @@ export class SelectionPill {
 					this.markBusy(btn, false);
 				});
 			});
-			div.appendChild(btn);
 		}
-		document.body.appendChild(div);
 		this.fallbackEl = div;
 	}
 

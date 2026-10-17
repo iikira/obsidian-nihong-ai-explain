@@ -62,6 +62,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 			tryStartTask: (a, t) => this.tryStartTask(a, t),
 			finishTask: (a, t) => this.finishTask(a, t),
 			getSelectionRect: () => getSelectionRect(),
+			getApp: () => this.app,
 		});
 		this.dictionaryManager = new DictionaryManager();
 		this.dictionaryManager.setApp(this.app);

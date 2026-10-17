@@ -95,27 +95,21 @@ export class DictionaryPopup {
 		if (this.el) {
 			return;
 		}
-		const div = document.createElement("div");
-		div.className = CARD_CLASS;
+		const div = document.body.createEl("div", { cls: CARD_CLASS });
 		const fs = this.getFontSize?.() ?? 0;
 		if (fs > 0) {
 			div.setCssProps({ "--nihong-ai-dict-fs": `${fs}px` });
 		}
 		div.setCssStyles({ display: "none" });
-		const close = document.createElement("button");
-		close.className = "nihong-ai-dict-close";
-		close.innerHTML = "&times;";
+		const close = div.createEl("button", { cls: "nihong-ai-dict-close" });
+		close.textContent = "×";
 		close.title = "关闭";
 		close.addEventListener("click", (e) => {
 			e.preventDefault();
 			e.stopPropagation();
 			this.hide();
 		});
-		div.appendChild(close);
-		const body = document.createElement("div");
-		body.className = "nihong-ai-dict-body";
-		div.appendChild(body);
-		document.body.appendChild(div);
+		div.createEl("div", { cls: "nihong-ai-dict-body" });
 		this.el = div;
 	}
 
@@ -123,24 +117,19 @@ export class DictionaryPopup {
 		if (!this.el) {
 			return;
 		}
-		const body = this.el.querySelector(".nihong-ai-dict-body") as HTMLElement | null;
+		const body = this.el.querySelector(".nihong-ai-dict-body");
 		if (!body) {
 			return;
 		}
 		body.empty();
 		this.el.dataset.state = state;
 		if (state === "loading") {
-			const spinner = document.createElement("div");
-			spinner.className = "nihong-ai-spinner";
-			const label = document.createElement("span");
+			body.createEl("div", { cls: "nihong-ai-spinner" });
+			const label = body.createEl("span");
 			label.textContent = content;
-			body.appendChild(spinner);
-			body.appendChild(label);
 		} else {
-			const msg = document.createElement("div");
-			msg.className = "nihong-ai-dict-message";
+			const msg = body.createEl("div", { cls: "nihong-ai-dict-message" });
 			msg.textContent = content;
-			body.appendChild(msg);
 		}
 	}
 
@@ -148,12 +137,12 @@ export class DictionaryPopup {
 		if (!this.el) {
 			return;
 		}
-		const body = this.el.querySelector(".nihong-ai-dict-body") as HTMLElement | null;
+		const body = this.el.querySelector(".nihong-ai-dict-body");
 		if (!body) {
 			return;
 		}
 		body.empty();
-		this.el!.dataset.state = "result";
+		this.el.dataset.state = "result";
 
 		// 排序：expression === reading 的（纯假名词）排前，再按 score 降序
 		const sorted = [...terms].sort((a, b) => {
@@ -177,96 +166,71 @@ export class DictionaryPopup {
 
 		for (const [key, groupTerms] of groups) {
 			const [expression, reading] = key.split("|");
-			const entryDiv = document.createElement("div");
-			entryDiv.className = "nihong-ai-dict-entry";
+			const entryDiv = body.createEl("div", { cls: "nihong-ai-dict-entry" });
 
 			// 振假名 header
-			const header = document.createElement("div");
-			header.className = "nihong-ai-dict-header";
+			const header = entryDiv.createEl("div", { cls: "nihong-ai-dict-header" });
 			if (expression !== reading) {
 				const segments = getFuriganaSegments(expression, reading);
-				const wrapper = document.createElement("span");
-				wrapper.className = "nihong-ai-dict-furigana";
+				const wrapper = header.createEl("span", { cls: "nihong-ai-dict-furigana" });
 				// 每个 segment 用独立 <ruby> 包裹：base 文本 + <rt>（有 reading 时）。
 				// 单 <ruby> 多 segment 时，<rt> 会注在其前所有 base 上方（错位），
 				// 故每 segment 独立 <ruby> 保证 base 与假名一一配对对齐。
 				for (const seg of segments) {
-					const ruby = document.createElement("ruby");
-					ruby.appendChild(document.createTextNode(seg.text));
-					const rt = document.createElement("rt");
+					const ruby = wrapper.createEl("ruby");
+					ruby.appendText(seg.text);
+					const rt = ruby.createEl("rt");
 					rt.textContent = seg.reading;
-					ruby.appendChild(rt);
-					wrapper.appendChild(ruby);
 				}
-				header.appendChild(wrapper);
 			} else {
-				const span = document.createElement("span");
-				span.className = "nihong-ai-dict-furigana";
+				const span = header.createEl("span", { cls: "nihong-ai-dict-furigana" });
 				span.textContent = expression;
-				header.appendChild(span);
 			}
 
 			// 变形原因
 			const first = groupTerms[0];
 			if (first.deinflectionReasons && first.deinflectionReasons.length > 0) {
-				const reason = document.createElement("span");
-				reason.className = "nihong-ai-dict-reason";
+				const reason = header.createEl("span", { cls: "nihong-ai-dict-reason" });
 				reason.textContent = ` ← ${first.deinflectionReasons.join(" ← ")}`;
-				header.appendChild(reason);
 			}
 
 			// 声调（pitch accent）：圆圈数字标记，多个候选用逗号分隔
 			const accents = this.getAccents?.(expression, reading);
 			if (accents && accents.length > 0) {
-				const accentSpan = document.createElement("span");
-				accentSpan.className = "nihong-ai-dict-accent";
+				const accentSpan = header.createEl("span", { cls: "nihong-ai-dict-accent" });
 				accentSpan.textContent = accents
 					.map((p) => toAccentCircle(p))
 					.join(",");
 				accentSpan.title = "声调（数字为声调核位置）";
-				header.appendChild(accentSpan);
 			}
 
-			entryDiv.appendChild(header);
-
 			// 释义列表
-			const ol = document.createElement("ol");
-			ol.className = "nihong-ai-dict-senses";
+			const ol = entryDiv.createEl("ol", { cls: "nihong-ai-dict-senses" });
 			for (const term of groupTerms) {
-				const li = document.createElement("li");
-				li.className = "nihong-ai-dict-sense";
+				const li = ol.createEl("li", { cls: "nihong-ai-dict-sense" });
 
 				// 词性标签
 				if (term.tags.length > 0) {
-					const tagSpan = document.createElement("span");
-					tagSpan.className = "nihong-ai-dict-tags";
+					const tagSpan = li.createEl("span", { cls: "nihong-ai-dict-tags" });
 					for (const t of term.tags) {
 						if (!t) {
 							continue;
 						}
-						const tag = document.createElement("span");
-						tag.className = "nihong-ai-dict-tag";
+						const tag = tagSpan.createEl("span", { cls: "nihong-ai-dict-tag" });
 						tag.textContent = t;
 						const tagDef = this.getTag(t);
 						if (tagDef) {
 							tag.title = tagDef.notes || tagDef.short || "";
 						}
-						tagSpan.appendChild(tag);
 					}
-					li.appendChild(tagSpan);
 				}
 
 				// 释义内容
-				const glossDiv = document.createElement("div");
-				glossDiv.className = "nihong-ai-dict-glossary";
+				const glossDiv = li.createEl("div", { cls: "nihong-ai-dict-glossary" });
 				for (const g of term.glossary) {
 					this.renderContentNode(glossDiv, g as ContentNode);
 				}
-				li.appendChild(glossDiv);
-				ol.appendChild(li);
 			}
-			entryDiv.appendChild(ol);
-			body.appendChild(entryDiv);
 		}
 	}
 
@@ -275,14 +239,13 @@ export class DictionaryPopup {
 			return;
 		}
 		if (typeof node === "string") {
-			const span = document.createElement("span");
+			const span = container.createEl("span");
 			span.textContent = node;
-			container.appendChild(span);
 			return;
 		}
 		if (Array.isArray(node)) {
 			for (const child of node) {
-				this.renderContentNode(container, child as ContentNode);
+				this.renderContentNode(container, child);
 			}
 			return;
 		}
@@ -312,7 +275,7 @@ export class DictionaryPopup {
 				el.lang = content.lang;
 			}
 			if (content.content !== undefined) {
-				this.renderContentNode(el, content.content as ContentNode);
+				this.renderContentNode(el, content.content);
 			}
 			container.appendChild(el);
 			return;
@@ -323,18 +286,17 @@ export class DictionaryPopup {
 		const t = node;
 		switch (t.type) {
 			case "text": {
-				const span = document.createElement("span");
+				const span = container.createEl("span");
 				span.textContent = t.text;
-				container.appendChild(span);
 				break;
 			}
 			case "structured":
 			case "structured-content": {
-				this.renderContentNode(container, t.content as ContentNode);
+				this.renderContentNode(container, t.content);
 				break;
 			}
 			case "link": {
-				const a = document.createElement("a");
+				const a = container.createEl("a");
 				if (t.href) {
 					a.setAttribute("href", t.href);
 				}
@@ -344,11 +306,10 @@ export class DictionaryPopup {
 				if (t.content !== undefined) {
 					this.renderContentNode(a, t.content as ContentNode);
 				}
-				container.appendChild(a);
 				break;
 			}
 			case "image": {
-				const img = document.createElement("img");
+				const img = container.createEl("img");
 				img.alt = t.title ?? "";
 				img.title = t.title ?? "";
 				if (t.width) {
@@ -358,47 +319,42 @@ export class DictionaryPopup {
 					img.height = t.height;
 				}
 				img.loading = "lazy";
-				container.appendChild(img);
 				break;
 			}
 			case "audio":
 				break;
 			case "quote": {
-				const q = document.createElement("blockquote");
-				q.className = "nihong-ai-dict-quote";
+				const q = container.createEl("blockquote", { cls: "nihong-ai-dict-quote" });
 				if (t.content !== undefined) {
 					this.renderContentNode(q, t.content as ContentNode);
 				}
-				container.appendChild(q);
 				break;
 			}
 			case "footnote": {
-				const fn = document.createElement("aside");
-				fn.className = "nihong-ai-dict-footnote";
+				const fn = container.createEl("aside", { cls: "nihong-ai-dict-footnote" });
 				if (t.reference) {
-					const ref = document.createElement("span");
-					ref.className = "nihong-ai-dict-footnote-ref";
-					ref.textContent = t.reference;
-					fn.appendChild(ref);
+					fn.createEl("span", {
+						cls: "nihong-ai-dict-footnote-ref",
+						text: t.reference,
+					});
 				}
 				if (t.content !== undefined) {
 					this.renderContentNode(fn, t.content as ContentNode);
 				}
-				container.appendChild(fn);
 				break;
 			}
 			case "deinflection": {
 				if (t.variant) {
-					const span = document.createElement("span");
-					span.className = "nihong-ai-dict-deinflection";
-					span.textContent = t.variant;
-					container.appendChild(span);
+					container.createEl("span", {
+						cls: "nihong-ai-dict-deinflection",
+						text: t.variant,
+					});
 				}
 				break;
 			}
 			case "example": {
 				if (t.content !== undefined) {
-					this.renderContentNode(container, t.content as ContentNode);
+					this.renderContentNode(container, t.content);
 				}
 				break;
 			}

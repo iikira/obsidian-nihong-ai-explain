@@ -895,26 +895,28 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					this.refreshDropdownOptions();
 				});
 				// blur 校验空 + 重名，最终一致性更新
-				text.inputEl.addEventListener("blur", async () => {
-					const v = text.inputEl.value.trim();
-					if (!v) {
-						new Notice("分组名称不能为空");
-						text.inputEl.value = g.name;
-						return;
-					}
-					// 检查重名（排除自身）
-					const dup = this.plugin.settings.modelGroups.find(
-						(x) => x.id !== g.id && x.name === v,
-					);
-					if (dup) {
-						new Notice(`分组名称「${v}」已存在`);
-						text.inputEl.value = g.name;
-						return;
-					}
-					g.name = v;
-					await this.plugin.saveSettings();
-					// 全页重渲染：标题行 + 当前分组下拉框 + AI讲解/翻译下拉框 都同步新名
-					this.display();
+				text.inputEl.addEventListener("blur", () => {
+					void (async () => {
+						const v = text.inputEl.value.trim();
+						if (!v) {
+							new Notice("分组名称不能为空");
+							text.inputEl.value = g.name;
+							return;
+						}
+						// 检查重名（排除自身）
+						const dup = this.plugin.settings.modelGroups.find(
+							(x) => x.id !== g.id && x.name === v,
+						);
+						if (dup) {
+							new Notice(`分组名称「${v}」已存在`);
+							text.inputEl.value = g.name;
+							return;
+						}
+						g.name = v;
+						await this.plugin.saveSettings();
+						// 全页重渲染：标题行 + 当前分组下拉框 + AI讲解/翻译下拉框 都同步新名
+						this.display();
+					})();
 				});
 			})
 			.addExtraButton((btn) => {

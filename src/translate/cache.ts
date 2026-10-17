@@ -1,22 +1,55 @@
+import type { App } from "obsidian";
+
 const STORAGE_KEY = "nihong-ai-translate-cache";
 const CAPACITY = 1024;
 const FLUSH_DELAY_MS = 500;
 
 /**
+ * 缓存持久化适配器：解耦 LRUTranslateCache 与 localStorage。
+ * 生产用 AppStorageAdapter（走 App#saveLocalStorage，多 vault 隔离），
+ * 测试可注入内存实现（避免依赖 localStorage）。
+ */
+export interface CacheStorage {
+	/** 读取 key 对应的值（已反序列化为对象）；无值返回 null */
+	load<T>(key: string): T | null;
+	/** 保存值（data=null 表示清除） */
+	save(key: string, data: unknown | null): void;
+}
+
+/** 走 Obsidian App 的 vault 级存储适配器（多 vault 隔离，替代直接用 localStorage） */
+export class AppStorageAdapter implements CacheStorage {
+	constructor(private app: App) {}
+	load<T>(key: string): T | null {
+		return this.app.loadLocalStorage(key) as T | null;
+	}
+	save(key: string, data: unknown | null): void {
+		this.app.saveLocalStorage(key, data);
+	}
+}
+
+/**
  * LRU 翻译缓存。内存用 Map（保持插入顺序，访问时 delete+set 提升为最新），
- * 持久化到 localStorage（防抖写入，避免高频请求时频繁写）。
+ * 持久化经 CacheStorage 适配器（生产走 App vault 级存储，防抖写入避免高频写）。
  */
 export class LRUTranslateCache {
 	private map: Map<string, string> = new Map();
 	private flushTimer: number | null = null;
+	private storage: CacheStorage | null = null;
+
+	/** 注入持久化适配器（由 TranslateService 在创建时传入 AppStorageAdapter） */
+	setStorage(storage: CacheStorage): void {
+		this.storage = storage;
+	}
 
 	load(): void {
+		if (!this.storage) {
+			return;
+		}
 		try {
-			const raw = localStorage.getItem(STORAGE_KEY);
-			if (!raw) {
+			const entries = this.storage.load<[string, string][]>(STORAGE_KEY);
+			if (!entries) {
 				return;
 			}
-			const entries = JSON.parse(raw) as [string, string][];
 			if (!Array.isArray(entries)) {
 				return;
 			}
@@ -64,10 +97,12 @@ export class LRUTranslateCache {
 			window.clearTimeout(this.flushTimer);
 			this.flushTimer = null;
 		}
-		try {
-			localStorage.removeItem(STORAGE_KEY);
-		} catch (e) {
-			console.warn("[nihong-ai] 清空 localStorage 失败:", e);
+		if (this.storage) {
+			try {
+				this.storage.save(STORAGE_KEY, null);
+			} catch (e) {
+				console.warn("[nihong-ai] 清空翻译缓存失败:", e);
+			}
 		}
 	}
 
@@ -75,7 +110,7 @@ export class LRUTranslateCache {
 		return this.map.size;
 	}
 
-	/** 立即写入 localStorage（卸载时调用） */
+	/** 立即写入存储（卸载时调用） */
 	flush(): void {
 		if (this.flushTimer != null) {
 			window.clearTimeout(this.flushTimer);
@@ -95,9 +130,12 @@ export class LRUTranslateCache {
 	}
 
 	private writeNow(): void {
+		if (!this.storage) {
+			return;
+		}
 		try {
 			const entries = [...this.map.entries()];
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+			this.storage.save(STORAGE_KEY, entries);
 		} catch (e) {
 			console.warn("[nihong-ai] 翻译缓存写入失败:", e);
 		}

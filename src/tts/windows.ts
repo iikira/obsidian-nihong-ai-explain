@@ -20,25 +20,98 @@
 
 import { ONECORE_TTS_B64 } from "./onecore/onecoreTtsB64";
 
-// 仅桌面端 Electron 环境有 window.require，用动态 require 拿 child_process / fs / os
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const g: any = globalThis as any;
+// 仅桌面端 Electron 环境有 window.require，用动态 require 拿 child_process / fs / os / path
+// （esbuild platform:browser 不会打包这些 require，故必须走 window.require 属性访问绕过打包器）。
+
+/** Electron 全局上可动态 require Node 模块的极小接口（避免用 any / globalThis） */
+interface ElectronGlobal {
+	require?: (mod: string) => NodeModuleLike;
+	process?: { platform?: string; env?: Record<string, string | undefined> };
+}
+
+/** require 返回的 Node 模块极小形状：带若干属性/方法，访问前都做 typeof 运行时检查 */
+interface NodeModuleLike {
+	[key: string]: ((...args: never[]) => unknown) | unknown;
+}
+
+/** Electron 全局对象（window.require / window.process） */
+const electron: ElectronGlobal = (window as unknown as ElectronGlobal);
+
+/** require 拿到的 fs 模块极小接口（仅用到的方法） */
+interface FsModule {
+	writeFileSync(path: string, data: Uint8Array): void;
+	readFile(
+		path: string,
+		cb: (err: Error | null, data: Buffer) => void,
+	): void;
+}
+
+/** require 拿到的 os 模块极小接口 */
+interface OsModule {
+	tmpdir(): string;
+}
+
+/** require 拿到的 path 模块极小接口 */
+interface PathModule {
+	join(...paths: string[]): string;
+}
+
+/** require 拿到的 child_process 模块极小接口 */
+interface ChildProcessModule {
+	execFile: (
+		file: string,
+		args: string[],
+		opts: Record<string, unknown>,
+		cb: (err: Error | null, stdout: string, stderr: string) => void,
+	) => void;
+}
+
+/** 拿到 fs 模块（桌面端可用时返回，否则 null） */
+function getFs(): FsModule | null {
+	const mod = electron.require?.("fs");
+	return mod && typeof mod.writeFileSync === "function"
+		? (mod as unknown as FsModule)
+		: null;
+}
+
+/** 拿到 os 模块 */
+function getOs(): OsModule | null {
+	const mod = electron.require?.("os");
+	return mod && typeof mod.tmpdir === "function"
+		? (mod as unknown as OsModule)
+		: null;
+}
+
+/** 拿到 path 模块 */
+function getPath(): PathModule | null {
+	const mod = electron.require?.("path");
+	return mod && typeof mod.join === "function"
+		? (mod as unknown as PathModule)
+		: null;
+}
+
+/** 拿到 child_process.execFile（仅桌面端可用；移动端返回 null） */
+function getExecFile(): ChildProcessModule["execFile"] | null {
+	try {
+		const mod = electron.require?.("child_process");
+		return mod && typeof mod.execFile === "function"
+			? (mod.execFile as ChildProcessModule["execFile"])
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/** 当前平台（win32 / darwin / linux…；非桌面端可能为 undefined） */
+function getPlatform(): string | undefined {
+	return electron.process?.platform;
+}
 
 /** 运行时释放后的 onecore_tts.exe 绝对路径（会话内缓存，避免重复写出） */
 let ttsExePath: string | null = null;
 
 /** exe 实际可运行性探测结果：null=未测，true=可用，false=不可用 */
 let windowsProbe: boolean | null = null;
-
-/** 拿到 child_process.execFile（仅桌面端可用；移动端返回 null） */
-function getExecFile(): ((file: string, args: string[], opts: Record<string, unknown>, cb: (err: Error | null, stdout: string, stderr: string) => void) => void) | null {
-	try {
-		const cp = g.require?.("child_process");
-		return typeof cp?.execFile === "function" ? cp.execFile : null;
-	} catch {
-		return null;
-	}
-}
 
 /**
  * 把内嵌的 onecore_tts.exe（base64）解码写出到系统临时目录，返回路径。
@@ -52,10 +125,10 @@ function ensureTtsExe(): string | null {
 		console.warn("[nihong-ai-explain tts] 内嵌的 onecore_tts.exe 数据为空，无法释放");
 		return null;
 	}
-	const fs = g.require?.("fs");
-	const os = g.require?.("os");
-	const path = g.require?.("path");
-	if (typeof fs?.writeFileSync !== "function" || typeof os?.tmpdir !== "function" || typeof path?.join !== "function") {
+	const fs = getFs();
+	const os = getOs();
+	const path = getPath();
+	if (!fs || !os || !path) {
 		console.warn("[nihong-ai-explain tts] fs/os/path 不可用，无法释放 onecore_tts.exe");
 		return null;
 	}
@@ -82,19 +155,14 @@ function ensureTtsExe(): string | null {
  */
 export function isWindowsTTSAvailable(): boolean {
 	try {
-		const platform = g.process?.platform;
-		const execFile = getExecFile();
-		if (platform !== "win32" || !execFile) {
+		if (getPlatform() !== "win32" || !getExecFile()) {
 			return false;
 		}
 		// 内嵌 exe 数据存在 + 具备释放条件（fs/os/path）
 		if (!ONECORE_TTS_B64) {
 			return false;
 		}
-		const fs = g.require?.("fs");
-		const os = g.require?.("os");
-		const path = g.require?.("path");
-		return typeof fs?.writeFileSync === "function" && typeof os?.tmpdir === "function" && typeof path?.join === "function";
+		return !!getFs() && !!getOs() && !!getPath();
 	} catch {
 		return false;
 	}
@@ -110,7 +178,7 @@ export async function probeWindowsTTSOnce(): Promise<boolean> {
 		return windowsProbe;
 	}
 	const execFile = getExecFile();
-	if (!execFile || g.process?.platform !== "win32") {
+	if (!execFile || getPlatform() !== "win32") {
 		windowsProbe = false;
 		return false;
 	}
@@ -122,7 +190,7 @@ export async function probeWindowsTTSOnce(): Promise<boolean> {
 	windowsProbe = await new Promise<boolean>((resolve) => {
 		try {
 			execFile(
-				exe!,
+				exe,
 				["list"],
 				{ timeout: 8000, windowsHide: true },
 				(err, stdout) => {
@@ -254,7 +322,7 @@ export async function synthesizeWindows(
 	voice: string,
 ): Promise<ArrayBuffer> {
 	const execFile = getExecFile();
-	if (!execFile || g.process?.platform !== "win32") {
+	if (!execFile || getPlatform() !== "win32") {
 		throw new Error("Windows 系统朗读仅在 Windows 桌面端可用");
 	}
 	const exe = ensureTtsExe();
@@ -268,11 +336,12 @@ export async function synthesizeWindows(
 	const ssml = `<speak version="1.0" xml:lang="ja-JP"><prosody rate="${rateStr}">${escaped}</prosody></speak>`;
 
 	// 输出到系统临时目录的固定文件
-	const outPath = `${g.process.env?.TEMP ?? g.process.env?.TMP ?? "."}/nihong_ai_onecore.wav`;
+	const env = electron.process?.env ?? {};
+	const outPath = `${env.TEMP ?? env.TMP ?? "."}/nihong_ai_onecore.wav`;
 
 	return new Promise<ArrayBuffer>((resolve, reject) => {
 		try {
-			execFile!(
+			execFile(
 				exe,
 				["synth", ssml, outPath, voice || "Ayumi"],
 				{ timeout: 30000, windowsHide: true, maxBuffer: 20 * 1024 * 1024 },
@@ -299,9 +368,9 @@ export async function synthesizeWindows(
 						reject(new Error("Windows OneCore 朗读返回空音频"));
 						return;
 					}
-					// 从 exe 输出路径读回字节（用 globalThis.require 拿 fs，避免 esbuild 打包 node 模块）
-					const fs = g.require?.("fs");
-					if (typeof fs?.readFile !== "function") {
+					// 从 exe 输出路径读回字节（用 window.require 拿 fs，避免 esbuild 打包 node 模块）
+					const fs = getFs();
+					if (!fs) {
 						reject(new Error("读取 OneCore 音频失败：fs 不可用"));
 						return;
 					}
