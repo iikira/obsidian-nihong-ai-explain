@@ -5,14 +5,13 @@ import {
 	Notice,
 	PluginSettingTab,
 	Setting,
-	SettingGroup,
 	SettingDefinitionItem,
-	SettingPage,
 	SliderComponent,
 	requestUrl,
 } from "obsidian";
 import type NihongAIExplainPlugin from "./main";
 import { FolderSuggest } from "./settings/folderSuggest";
+import { createSettingsSection } from "./settings/section";
 import type { JitendexSourceInfo } from "./dictionary/manager";
 import {
 	clearTTSCache,
@@ -154,17 +153,15 @@ async function fetchEdgeVoices(): Promise<{ shortName: string; friendlyName: str
 
 export class NihongAIExplainSettingTab extends PluginSettingTab {
 	plugin: NihongAIExplainPlugin;
-	/** 当前分组下拉框引用，分组名变化时实时刷新选项（ModelGroupSettingPage 访问） */
-	activeDropdown: DropdownComponent | null = null;
-	/** 当前激活分组的编辑区容器（只显示一个分组），切换下拉框时重渲染（ModelGroupSettingPage 访问） */
-	activeGroupContainer: HTMLElement | null = null;
-	/** 当前打开的大模型分组子页面（若有），分组结构变更时重渲染该页面而非整个设置 tab（ModelGroupSettingPage 访问） */
-	activeModelGroupPage: ModelGroupSettingPage | null = null;
+	/** 当前分组下拉框引用，分组名变化时实时刷新选项 */
+	private activeDropdown: DropdownComponent | null = null;
+	/** 当前激活分组的编辑区容器（只显示一个分组），切换下拉框时重渲染 */
+	private activeGroupContainer: HTMLElement | null = null;
 	/** 当前激活分组「模型 id」下拉面板（列出 /v1/models 返回的模型，点击选择） */
-	activeModelListPanel: HTMLDivElement | null = null;
+	private activeModelListPanel: HTMLDivElement | null = null;
 	/** 当前激活分组「模型 id」输入框引用（选择模型时回填用） */
-	activeModelInput: HTMLInputElement | null = null;
-	/** 引擎切换时按 engine 显隐的三行（跨 render 回调引用，render 时各自赋值） */
+	private activeModelInput: HTMLInputElement | null = null;
+	/** 引擎切换时按 engine 显隐的三行（render 时各自赋值） */
 	private googleDomainSetting: Setting | null = null;
 	private edgeVoiceSetting: Setting | null = null;
 	private windowsVoiceSetting: Setting | null = null;
@@ -174,499 +171,504 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	/**
+	 * 声明式设置入口：返回一个根定义，其 render 命令式渲染整个设置树（参考 lexis）。
+	 * 用 createSettingsSection 渲染可折叠分区（<details>/<summary>，默认展开，点击标题折叠/展开）。
+	 */
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		return [
-			// ====== 输出目录 ======
 			{
-				name: "单词解析输出目录",
-				desc: "单词解析保存到此目录。留空则输出到根目录。",
+				name: "Nihong AI 讲解",
+				aliases: ["朗读", "翻译", "词典", "大模型", "Jitendex", "TTS", "Lexis"],
 				render: (setting: Setting) => {
-					setting.addSearch((search) => {
-						const apply = async (value: string): Promise<void> => {
-							this.plugin.settings.outputDir = value.trim();
-							await this.plugin.saveSettings();
-						};
-						search
-							.setPlaceholder("单词解析")
-							.setValue(this.plugin.settings.outputDir)
-							.onChange((value) => void apply(value));
-						// 输入时弹出 vault 文件夹候选下拉，可过滤与点选（交互参考 lexis）
-						// 点选后 setValue 不会触发 onChange，需在 onPick 里直接保存
-						new FolderSuggest(this.app, search.inputEl, (folder) => {
-							search.setValue(folder);
-							void apply(folder);
-						});
-					});
-				},
-			},
-			{
-				name: "语法拆解输出目录",
-				desc: "语法拆解笔记保存到此目录。留空则输出到根目录。",
-				render: (setting: Setting) => {
-					setting.addSearch((search) => {
-						const apply = async (value: string): Promise<void> => {
-							this.plugin.settings.grammarOutputDir = value.trim();
-							await this.plugin.saveSettings();
-						};
-						search
-							.setPlaceholder("语法拆解")
-							.setValue(this.plugin.settings.grammarOutputDir)
-							.onChange((value) => void apply(value));
-						new FolderSuggest(this.app, search.inputEl, (folder) => {
-							search.setValue(folder);
-							void apply(folder);
-						});
-					});
-				},
-			},
-
-			// ====== 大模型分组管理 ======
-			// 整个区块用命令式子页面渲染（复杂动态编辑器：当前分组下拉 + 分组编辑区 + 三个模型分配下拉），
-			// 避开 declarative render 回调被多次调用导致分组编辑区重复显示的问题。
-			// 子页面 display() 直接用 containerEl 渲染，与原 display() 逻辑一致。
-			{
-				type: "page",
-				name: "大模型分组",
-				desc: "管理大模型分组（API 地址 / 模型 id / API Key），并为讲解、翻译、语法拆解分配分组。",
-				page: () => this.modelGroupPage(),
-			},
-
-			// ====== 提示词与采样 ======
-			{
-				name: "温度 (temperature)",
-				render: (setting: Setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder("0.7")
-							.setValue(String(this.plugin.settings.temperature))
-							.onChange(async (value) => {
-								const n = Number(value);
-								if (!isNaN(n)) {
-									this.plugin.settings.temperature = n;
-									await this.plugin.saveSettings();
-								}
-							}),
-					);
-				},
-			},
-			{
-				name: "最大重试次数",
-				render: (setting: Setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder("3")
-							.setValue(String(this.plugin.settings.maxRetries))
-							.onChange(async (value) => {
-								const n = Math.max(0, Math.floor(Number(value) || 0));
-								this.plugin.settings.maxRetries = n;
-								await this.plugin.saveSettings();
-							}),
-					);
-				},
-			},
-			{
-				name: "重试间隔 (毫秒)",
-				render: (setting: Setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder("2000")
-							.setValue(String(this.plugin.settings.retryInterval))
-							.onChange(async (value) => {
-								const n = Math.max(0, Math.floor(Number(value) || 0));
-								this.plugin.settings.retryInterval = n;
-								await this.plugin.saveSettings();
-							}),
-					);
-				},
-			},
-			{
-				name: "单次请求超时 (毫秒)",
-				render: (setting: Setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder("120000")
-							.setValue(String(this.plugin.settings.requestTimeout))
-							.onChange(async (value) => {
-								const n = Math.max(1000, Math.floor(Number(value) || 0));
-								this.plugin.settings.requestTimeout = n;
-								await this.plugin.saveSettings();
-							}),
-					);
-				},
-			},
-			{
-				name: "翻译目标语言",
-				desc: "翻译功能的目标语言，如「中文」「英文」等。",
-				render: (setting: Setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder("中文")
-							.setValue(this.plugin.settings.targetLanguage)
-							.onChange(async (value) => {
-								this.plugin.settings.targetLanguage = value.trim() || "中文";
-								await this.plugin.saveSettings();
-							}),
-					);
-				},
-			},
-			{
-				name: "词典卡片字号",
-				desc: "词典卡片正文基础字号（px），范围为 8–32，默认 0（使用 Obsidian 主题默认值）。修改后新打开的卡片生效。",
-				render: (setting: Setting) => {
-					setting.addText((text) =>
-						text
-							.setPlaceholder("0")
-							.setValue(String(this.plugin.settings.dictFontSize))
-							.onChange(async (value) => {
-								const n = Number(value);
-								if (
-									Number.isFinite(n) &&
-									(n === 0 || (n >= 8 && n <= 32))
-								) {
-									this.plugin.settings.dictFontSize = n;
-									await this.plugin.saveSettings();
-									text.inputEl.setCssStyles({ borderColor: "" });
-								} else {
-									text.inputEl.setCssStyles({
-										borderColor: "var(--text-error)",
-									});
-								}
-							}),
-					);
-				},
-			},
-			{
-				name: "禁用 Lexis 悬浮窗",
-				desc: "开启后完全阻止 Lexis 选区悬浮窗弹出，改用本插件自带悬浮按钮。需重新选词生效。",
-				render: (setting: Setting) => {
-					setting.addToggle((toggle) =>
-						toggle
-							.setValue(this.plugin.settings.disableLexisPill)
-							.onChange(async (value) => {
-								this.plugin.settings.disableLexisPill = value;
-								await this.plugin.saveSettings();
-								this.plugin.applyLexisPillDisabled();
-							}),
-					);
-				},
-			},
-
-			// ====== 朗读 ======
-			{
-				name: "朗读引擎",
-				desc: "选择 TTS 朗读引擎。Google 简单稳定；Edge 暂不可用；Windows 调用系统自带朗读，离线可用（仅 Windows 桌面端）。",
-				render: (setting: Setting) => {
-					setting.addDropdown(async (dropdown) => {
-						dropdown
-							.addOption("google", "Google Translate")
-							.addOption("edge", "Edge TTS");
-						// Windows 系统朗读仅在 Windows 桌面端可选，且内嵌 onecore_tts.exe 需真实可用：
-						// 若 exe 在目标机器执行失败（如系统版本太低、.NET Framework 缺失），探测返回 false，
-						// 则不显示该选项，由用户回退到其它引擎。
-						const winAvail = await probeWindowsTTSOnce();
-						if (winAvail) {
-							dropdown.addOption("windows", "Windows 系统朗读");
-						}
-						// 若当前值不可用（如移动端选中过 windows，或 exe 执行失败），回退到 google
-						let value = this.plugin.settings.ttsEngine;
-						if (value === "windows" && !winAvail) {
-							value = "google";
-							this.plugin.settings.ttsEngine = "google";
-							await this.plugin.saveSettings();
-						}
-						dropdown.setValue(value)
-							.onChange(async (engineVal) => {
-								const engine = engineVal as TtsEngine;
-								this.plugin.settings.ttsEngine = engine;
-								await this.plugin.saveSettings();
-								// 切换引擎时，把对应引擎的语音下发给 TTS 配置
-								setTTSConfig({
-									engine,
-									voice: engine === "windows"
-										? this.plugin.settings.ttsWindowsVoice
-										: this.plugin.settings.ttsEdgeVoice,
-									rate: this.plugin.settings.ttsRate,
-									googleDomain: this.plugin.settings.ttsGoogleDomain,
-								});
-								// 按 engine 重新评估三个引擎相关行的 visible 谓词，不重渲染整个页面
-								this.refreshDomState();
-							});
-					});
-				},
-			},
-			{
-				name: "Google Translate 域名",
-				desc: "Google Translate 的自定义域名",
-				visible: () => this.plugin.settings.ttsEngine === "google",
-				render: (setting: Setting) => {
-					this.googleDomainSetting = setting;
-					setting.addText((text) => {
-						text.setPlaceholder("translate.google.com")
-							.setValue(this.plugin.settings.ttsGoogleDomain)
-							.onChange(async (value) => {
-								const v = value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-								this.plugin.settings.ttsGoogleDomain = v;
-								await this.plugin.saveSettings();
-								setTTSConfig({
-									engine: this.plugin.settings.ttsEngine,
-									voice: this.plugin.settings.ttsEdgeVoice,
-									rate: this.plugin.settings.ttsRate,
-									googleDomain: v,
-								});
-							});
-					});
-				},
-			},
-			{
-				name: "Edge 语音",
-				desc: "选择 Edge TTS 的日文语音。",
-				visible: () => this.plugin.settings.ttsEngine === "edge",
-				render: (setting: Setting) => {
-					this.edgeVoiceSetting = setting;
-					// 语音下拉异步填充（仅在显示时拉取）
-					setting.addDropdown(async (dropdown) => {
-						dropdown.addOption(
-							this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
-							"加载中…",
-						);
-						dropdown.setValue(
-							this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
-						);
-						const voices = await fetchEdgeVoices();
-						dropdown.selectEl.empty();
-						for (const v of voices) {
-							dropdown.addOption(v.shortName, v.friendlyName);
-						}
-						const current = this.plugin.settings.ttsEdgeVoice;
-						if (!voices.some((v) => v.shortName === current)) {
-							const fallback = voices[0]?.shortName ?? "ja-JP-NanamiNeural";
-							this.plugin.settings.ttsEdgeVoice = fallback;
-							await this.plugin.saveSettings();
-						}
-						dropdown.setValue(this.plugin.settings.ttsEdgeVoice);
-						dropdown.onChange(async (value) => {
-							this.plugin.settings.ttsEdgeVoice = value;
-							await this.plugin.saveSettings();
-							setTTSConfig({
-								engine: this.plugin.settings.ttsEngine,
-								voice: value,
-								rate: this.plugin.settings.ttsRate,
-								googleDomain: this.plugin.settings.ttsGoogleDomain,
-							});
-						});
-					});
-				},
-			},
-			{
-				name: "Windows 语音",
-				desc: "选择 Windows 系统朗读的日文语音（来自系统已安装的语音包）。",
-				visible: () => isWindowsTTSAvailable() && this.plugin.settings.ttsEngine === "windows",
-				render: (setting: Setting) => {
-					this.windowsVoiceSetting = setting;
-					setting.addDropdown(async (dropdown) => {
-						dropdown.addOption("", "加载中…");
-						dropdown.setValue("");
-						let voices;
-						try {
-							voices = await listWindowsVoices();
-						} catch (e) {
-							const msg = e instanceof Error ? e.message : String(e);
-							console.error("[nihong-ai-explain tts] listWindowsVoices 抛错:", e);
-							dropdown.selectEl.empty();
-							dropdown.addOption("", `加载失败：${msg}`);
-							dropdown.setValue("");
-							return;
-						}
-						dropdown.selectEl.empty();
-						if (voices.length === 0) {
-							dropdown.addOption("", "未检测到日语语音（请在系统安装日语语音包）");
-							dropdown.setValue("");
-							return;
-						}
-						for (const v of voices) {
-							dropdown.addOption(v.id, v.name);
-						}
-						const current = this.plugin.settings.ttsWindowsVoice;
-						if (!current || !voices.some((v) => v.id === current)) {
-							const fallback = voices[0].id;
-							this.plugin.settings.ttsWindowsVoice = fallback;
-							await this.plugin.saveSettings();
-						}
-						dropdown.setValue(this.plugin.settings.ttsWindowsVoice);
-						dropdown.onChange(async (value) => {
-							this.plugin.settings.ttsWindowsVoice = value;
-							await this.plugin.saveSettings();
-							setTTSConfig({
-								engine: this.plugin.settings.ttsEngine,
-								voice: value,
-								rate: this.plugin.settings.ttsRate,
-								googleDomain: this.plugin.settings.ttsGoogleDomain,
-							});
-						});
-					});
-				},
-			},
-			{
-				name: "朗读语速",
-				desc: "TTS 朗读语速倍率，范围 0.5–3.0，1.0 为正常速度。修改后下次朗读生效。",
-				render: (setting: Setting) => {
-					setting.addSlider((slider: SliderComponent) => {
-						slider
-							.setLimits(0.5, 3.0, 0.1)
-							.setValue(this.plugin.settings.ttsRate)
-							.setDynamicTooltip()
-							.onChange(async (value) => {
-								// 步长 0.1 浮点累差容错：四舍五入到一位小数
-								const n = Math.round(value * 10) / 10;
-								this.plugin.settings.ttsRate = n;
-								await this.plugin.saveSettings();
-								setTTSConfig({
-									engine: this.plugin.settings.ttsEngine,
-									voice: this.plugin.settings.ttsEdgeVoice,
-									rate: n,
-									googleDomain: this.plugin.settings.ttsGoogleDomain,
-								});
-							});
-					});
-				},
-			},
-			{
-				name: "TTS 缓存",
-				desc: "LRU 缓存 TTS 音频，容量 128 条。",
-				render: (setting: Setting) => {
-					setting.setDesc(`LRU 缓存 TTS 音频，容量 128 条。当前 ${getTTSCacheSize()} 条。`);
-					setting.addButton((btn) =>
-						btn
-							.setButtonText("清空缓存")
-							.setWarning()
-							.onClick(async () => {
-								clearTTSCache();
-								new Notice("TTS 缓存已清空");
-								this.update();
-							}),
-					);
-				},
-			},
-			{
-				name: "翻译缓存",
-				desc: "LRU 缓存翻译结果，容量 1024 条。",
-				render: (setting: Setting) => {
-					setting.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 ${this.plugin.translateCache?.size() ?? 0} 条。`);
-					setting.addButton((btn) =>
-						btn
-							.setButtonText("清空缓存")
-							.setWarning()
-							.onClick(async () => {
-								this.plugin.translateCache?.clear();
-								new Notice("已清空翻译缓存");
-								setting.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 0 条。`);
-							}),
-					);
-				},
-			},
-
-			// ====== 词典管理 ======
-			{ name: "离线词典" },
-			{
-				name: "Jitendex 词典",
-				desc: "检测中…",
-				render: (setting: Setting) => {
-					// 按钮引用：在 addButton 回调里赋值，供 refreshDictStatus 切换文案
-					let jitendexBtn: ButtonComponent | null = null;
-
-					/** 刷新 Jitendex 行：desc 显示已导入/最新版本，按钮文案随是否已安装切换 */
-					const refreshDictStatus = async (forceLatest = false): Promise<void> => {
-						const mgr = this.plugin.dictionaryManager;
-						if (!mgr || !mgr.isReady) {
-							setting.setDesc("词典未初始化");
-							return;
-						}
-						let info: JitendexSourceInfo | null = null;
-						try {
-							info = await mgr.getSourceInfo();
-						} catch (e) {
-							setting.setDesc("获取词典源信息失败");
-							console.warn("[nihong-ai] 获取 Jitendex 源信息失败:", e);
-							return;
-						}
-						setting.setDesc(this.formatJitendexDesc(info, forceLatest));
-						// 已导入 → 「更新词典」；未导入 → 「安装词典」
-						jitendexBtn?.setButtonText(
-							info.installedRevision ? "更新词典" : "安装词典",
-						);
-					};
-
-					setting.addButton((btn) => {
-						jitendexBtn = btn;
-						btn.setButtonText("安装词典")
-							.setCta()
-							.setTooltip("从 Jitendex 官方源下载并导入最新版")
-							.onClick(async () => {
-								const mgr = this.plugin.dictionaryManager;
-								if (!mgr) {
-									return;
-								}
-								const installing =
-									btn.buttonEl.textContent?.includes("安装") ?? false;
-								// 各阶段对应的文案：更新到设置行描述（描述行更宽，
-								// 状态文本不会被截断；按钮在禁用态下文本显示不出来，故不更新按钮）
-								const stageText: Record<string, string> = {
-									fetching: "检测版本中…",
-									downloading: "下载词典中…",
-									installing: "安装词典中…",
-									done: "完成",
-								};
-								const setStage = (stage: string): void => {
-									setting.setDesc(stageText[stage] ?? "处理中…");
-								};
-								setStage("fetching");
-								btn.setDisabled(true);
-								try {
-									const res = await mgr.updateJitendex((stage) => {
-										setStage(stage);
-									});
-									if (res.updated) {
-										new Notice(
-											`已${installing ? "安装" : "更新"}到 ${res.revision ?? "(未知版本)"}`,
-											5000,
-										);
-									} else {
-										new Notice(`已是最新版本: ${res.revision ?? "(未知)"}`);
-									}
-								} catch (e) {
-									const msg = e instanceof Error ? e.message : String(e);
-									new Notice(`${installing ? "安装" : "更新"}失败: ${msg}`, 8000);
-									console.error("[nihong-ai] Jitendex 更新失败:", e);
-								} finally {
-									btn.setDisabled(false);
-									await refreshDictStatus();
-								}
-							});
-					});
-					void refreshDictStatus();
-				},
-			},
-			{
-				name: "清空词典",
-				desc: "清空 IndexedDB 中的所有词典数据。",
-				render: (setting: Setting) => {
-					setting.addButton((btn) =>
-						btn
-							.setButtonText("清空")
-							.setWarning()
-							.onClick(async () => {
-								const mgr = this.plugin.dictionaryManager;
-								if (!mgr) {
-									return;
-								}
-								await mgr.clear();
-								new Notice("已清空词典");
-								this.update();
-							}),
-					);
+					this.renderSettings(setting.settingEl);
 				},
 			},
 		];
+	}
+
+	/** 渲染整个设置页：6 个可折叠分区。各分区内用 new Setting(body) 添加设置项。 */
+	private renderSettings(containerEl: HTMLElement): void {
+		containerEl.empty();
+		// setting.settingEl 是 .setting-item（flex 布局），直接往里渲染会让分区横向排列。
+		// 改用一个块级子 div 作真正根容器，分区在此垂直堆叠。
+		const root = containerEl.createDiv({ cls: "nihong-ai-settings-root" });
+
+		// ====== 输出目录 ======
+		{
+			const body = createSettingsSection(root, "输出目录");
+			new Setting(body)
+				.setName("单词解析输出目录")
+				.setDesc("单词解析保存到此目录。留空则输出到根目录。")
+				.addSearch((search) => {
+					const apply = async (value: string): Promise<void> => {
+						this.plugin.settings.outputDir = value.trim();
+						await this.plugin.saveSettings();
+					};
+					search
+						.setPlaceholder("单词解析")
+						.setValue(this.plugin.settings.outputDir)
+						.onChange((value) => void apply(value));
+					// 输入时弹出 vault 文件夹候选下拉，可过滤与点选（交互参考 lexis）
+					// 点选后 setValue 不会触发 onChange，需在 onPick 里直接保存
+					new FolderSuggest(this.app, search.inputEl, (folder) => {
+						search.setValue(folder);
+						void apply(folder);
+					});
+				});
+			new Setting(body)
+				.setName("语法拆解输出目录")
+				.setDesc("语法拆解笔记保存到此目录。留空则输出到根目录。")
+				.addSearch((search) => {
+					const apply = async (value: string): Promise<void> => {
+						this.plugin.settings.grammarOutputDir = value.trim();
+						await this.plugin.saveSettings();
+					};
+					search
+						.setPlaceholder("语法拆解")
+						.setValue(this.plugin.settings.grammarOutputDir)
+						.onChange((value) => void apply(value));
+					new FolderSuggest(this.app, search.inputEl, (folder) => {
+						search.setValue(folder);
+						void apply(folder);
+					});
+				});
+		}
+
+		// ====== 大模型分组（内联，同其他分区风格，非子页面） ======
+		{
+			const body = createSettingsSection(root, "大模型分组");
+			this.renderModelGroupSection(body);
+		}
+
+		// ====== 采样参数 ======
+		{
+			const body = createSettingsSection(root, "采样参数");
+			new Setting(body)
+				.setName("温度 (temperature)")
+				.addText((text) =>
+					text
+						.setPlaceholder("0.7")
+						.setValue(String(this.plugin.settings.temperature))
+						.onChange(async (value) => {
+							const n = Number(value);
+							if (!isNaN(n)) {
+								this.plugin.settings.temperature = n;
+								await this.plugin.saveSettings();
+							}
+						}),
+				);
+			new Setting(body)
+				.setName("最大重试次数")
+				.addText((text) =>
+					text
+						.setPlaceholder("3")
+						.setValue(String(this.plugin.settings.maxRetries))
+						.onChange(async (value) => {
+							const n = Math.max(0, Math.floor(Number(value) || 0));
+							this.plugin.settings.maxRetries = n;
+							await this.plugin.saveSettings();
+						}),
+				);
+			new Setting(body)
+				.setName("重试间隔 (毫秒)")
+				.addText((text) =>
+					text
+						.setPlaceholder("2000")
+						.setValue(String(this.plugin.settings.retryInterval))
+						.onChange(async (value) => {
+							const n = Math.max(0, Math.floor(Number(value) || 0));
+							this.plugin.settings.retryInterval = n;
+							await this.plugin.saveSettings();
+						}),
+				);
+			new Setting(body)
+				.setName("单次请求超时 (毫秒)")
+				.addText((text) =>
+					text
+						.setPlaceholder("120000")
+						.setValue(String(this.plugin.settings.requestTimeout))
+						.onChange(async (value) => {
+							const n = Math.max(1000, Math.floor(Number(value) || 0));
+							this.plugin.settings.requestTimeout = n;
+							await this.plugin.saveSettings();
+						}),
+				);
+			new Setting(body)
+				.setName("翻译目标语言")
+				.setDesc("翻译功能的目标语言，如「中文」「英文」等。")
+				.addText((text) =>
+					text
+						.setPlaceholder("中文")
+						.setValue(this.plugin.settings.targetLanguage)
+						.onChange(async (value) => {
+							this.plugin.settings.targetLanguage = value.trim() || "中文";
+							await this.plugin.saveSettings();
+						}),
+				);
+		}
+
+		// ====== 词典与显示 ======
+		{
+			const body = createSettingsSection(root, "词典与显示");
+			new Setting(body)
+				.setName("词典卡片字号")
+				.setDesc("词典卡片正文基础字号（px），范围为 8–32，默认 0（使用 Obsidian 主题默认值）。修改后新打开的卡片生效。")
+				.addText((text) =>
+					text
+						.setPlaceholder("0")
+						.setValue(String(this.plugin.settings.dictFontSize))
+						.onChange(async (value) => {
+							const n = Number(value);
+							if (
+								Number.isFinite(n) &&
+								(n === 0 || (n >= 8 && n <= 32))
+							) {
+								this.plugin.settings.dictFontSize = n;
+								await this.plugin.saveSettings();
+								text.inputEl.setCssStyles({ borderColor: "" });
+							} else {
+								text.inputEl.setCssStyles({
+									borderColor: "var(--text-error)",
+								});
+							}
+						}),
+				);
+			new Setting(body)
+				.setName("禁用 Lexis 悬浮窗")
+				.setDesc("开启后完全阻止 Lexis 选区悬浮窗弹出，改用本插件自带悬浮按钮。需重新选词生效。")
+				.addToggle((toggle) =>
+					toggle
+						.setValue(this.plugin.settings.disableLexisPill)
+						.onChange(async (value) => {
+							this.plugin.settings.disableLexisPill = value;
+							await this.plugin.saveSettings();
+							this.plugin.applyLexisPillDisabled();
+						}),
+				);
+		}
+
+		// ====== 朗读 ======
+		{
+			const body = createSettingsSection(root, "朗读");
+
+			// 朗读引擎：切换时按 engine 显隐下方三个引擎相关行
+			new Setting(body)
+				.setName("朗读引擎")
+				.setDesc("选择 TTS 朗读引擎。Google 简单稳定；Edge 暂不可用；Windows 调用系统自带朗读，离线可用（仅 Windows 桌面端）。")
+				.addDropdown(async (dropdown) => {
+					dropdown
+						.addOption("google", "Google Translate")
+						.addOption("edge", "Edge TTS");
+					// Windows 系统朗读仅在 Windows 桌面端可选，且内嵌 onecore_tts.exe 需真实可用：
+					// 若 exe 在目标机器执行失败（如系统版本太低、.NET Framework 缺失），探测返回 false，
+					// 则不显示该选项，由用户回退到其它引擎。
+					const winAvail = await probeWindowsTTSOnce();
+					if (winAvail) {
+						dropdown.addOption("windows", "Windows 系统朗读");
+					}
+					// 若当前值不可用（如移动端选中过 windows，或 exe 执行失败），回退到 google
+					let value = this.plugin.settings.ttsEngine;
+					if (value === "windows" && !winAvail) {
+						value = "google";
+						this.plugin.settings.ttsEngine = "google";
+						await this.plugin.saveSettings();
+					}
+					dropdown.setValue(value)
+						.onChange(async (engineVal) => {
+							const engine = engineVal as TtsEngine;
+							this.plugin.settings.ttsEngine = engine;
+							await this.plugin.saveSettings();
+							// 切换引擎时，把对应引擎的语音下发给 TTS 配置
+							setTTSConfig({
+								engine,
+								voice: engine === "windows"
+									? this.plugin.settings.ttsWindowsVoice
+									: this.plugin.settings.ttsEdgeVoice,
+								rate: this.plugin.settings.ttsRate,
+								googleDomain: this.plugin.settings.ttsGoogleDomain,
+							});
+							// 按 engine 切换三个引擎相关行的显隐，不重渲染整个页面
+							this.googleDomainSetting?.settingEl.toggle(engine === "google");
+							this.edgeVoiceSetting?.settingEl.toggle(engine === "edge");
+							this.windowsVoiceSetting?.settingEl.toggle(engine === "windows");
+						});
+				});
+
+			// Google Translate 域名（仅 google 引擎显示）
+			{
+				const s = new Setting(body)
+					.setName("Google Translate 域名")
+					.setDesc("Google Translate 的自定义域名");
+				this.googleDomainSetting = s;
+				s.settingEl.toggle(this.plugin.settings.ttsEngine === "google");
+				s.addText((text) => {
+					text.setPlaceholder("translate.google.com")
+						.setValue(this.plugin.settings.ttsGoogleDomain)
+						.onChange(async (value) => {
+							const v = value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+							this.plugin.settings.ttsGoogleDomain = v;
+							await this.plugin.saveSettings();
+							setTTSConfig({
+								engine: this.plugin.settings.ttsEngine,
+								voice: this.plugin.settings.ttsEdgeVoice,
+								rate: this.plugin.settings.ttsRate,
+								googleDomain: v,
+							});
+						});
+				});
+			}
+
+			// Edge 语音（仅 edge 引擎显示）
+			{
+				const s = new Setting(body)
+					.setName("Edge 语音")
+					.setDesc("选择 Edge TTS 的日文语音。");
+				this.edgeVoiceSetting = s;
+				s.settingEl.toggle(this.plugin.settings.ttsEngine === "edge");
+				s.addDropdown(async (dropdown) => {
+					dropdown.addOption(
+						this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
+						"加载中…",
+					);
+					dropdown.setValue(
+						this.plugin.settings.ttsEdgeVoice || "ja-JP-NanamiNeural",
+					);
+					const voices = await fetchEdgeVoices();
+					dropdown.selectEl.empty();
+					for (const v of voices) {
+						dropdown.addOption(v.shortName, v.friendlyName);
+					}
+					const current = this.plugin.settings.ttsEdgeVoice;
+					if (!voices.some((v) => v.shortName === current)) {
+						const fallback = voices[0]?.shortName ?? "ja-JP-NanamiNeural";
+						this.plugin.settings.ttsEdgeVoice = fallback;
+						await this.plugin.saveSettings();
+					}
+					dropdown.setValue(this.plugin.settings.ttsEdgeVoice);
+					dropdown.onChange(async (value) => {
+						this.plugin.settings.ttsEdgeVoice = value;
+						await this.plugin.saveSettings();
+						setTTSConfig({
+							engine: this.plugin.settings.ttsEngine,
+							voice: value,
+							rate: this.plugin.settings.ttsRate,
+							googleDomain: this.plugin.settings.ttsGoogleDomain,
+						});
+					});
+				});
+			}
+
+			// Windows 语音（仅 Windows 桌面端且 windows 引擎显示）
+			if (isWindowsTTSAvailable()) {
+				const s = new Setting(body)
+					.setName("Windows 语音")
+					.setDesc("选择 Windows 系统朗读的日文语音（来自系统已安装的语音包）。");
+				this.windowsVoiceSetting = s;
+				s.settingEl.toggle(this.plugin.settings.ttsEngine === "windows");
+				s.addDropdown(async (dropdown) => {
+					dropdown.addOption("", "加载中…");
+					dropdown.setValue("");
+					let voices;
+					try {
+						voices = await listWindowsVoices();
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						console.error("[nihong-ai-explain tts] listWindowsVoices 抛错:", e);
+						dropdown.selectEl.empty();
+						dropdown.addOption("", `加载失败：${msg}`);
+						dropdown.setValue("");
+						return;
+					}
+					dropdown.selectEl.empty();
+					if (voices.length === 0) {
+						dropdown.addOption("", "未检测到日语语音（请在系统安装日语语音包）");
+						dropdown.setValue("");
+						return;
+					}
+					for (const v of voices) {
+						dropdown.addOption(v.id, v.name);
+					}
+					const current = this.plugin.settings.ttsWindowsVoice;
+					if (!current || !voices.some((v) => v.id === current)) {
+						const fallback = voices[0].id;
+						this.plugin.settings.ttsWindowsVoice = fallback;
+						await this.plugin.saveSettings();
+					}
+					dropdown.setValue(this.plugin.settings.ttsWindowsVoice);
+					dropdown.onChange(async (value) => {
+						this.plugin.settings.ttsWindowsVoice = value;
+						await this.plugin.saveSettings();
+						setTTSConfig({
+							engine: this.plugin.settings.ttsEngine,
+							voice: value,
+							rate: this.plugin.settings.ttsRate,
+							googleDomain: this.plugin.settings.ttsGoogleDomain,
+						});
+					});
+				});
+			}
+
+			// 朗读语速
+			new Setting(body)
+				.setName("朗读语速")
+				.setDesc("TTS 朗读语速倍率，范围 0.5–3.0，1.0 为正常速度。修改后下次朗读生效。")
+				.addSlider((slider: SliderComponent) => {
+					slider
+						.setLimits(0.5, 3.0, 0.1)
+						.setValue(this.plugin.settings.ttsRate)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							// 步长 0.1 浮点累差容错：四舍五入到一位小数
+							const n = Math.round(value * 10) / 10;
+							this.plugin.settings.ttsRate = n;
+							await this.plugin.saveSettings();
+							setTTSConfig({
+								engine: this.plugin.settings.ttsEngine,
+								voice: this.plugin.settings.ttsEdgeVoice,
+								rate: n,
+								googleDomain: this.plugin.settings.ttsGoogleDomain,
+							});
+						});
+				});
+		}
+
+		// ====== 缓存管理 ======
+		{
+			const body = createSettingsSection(root, "缓存管理");
+
+			// TTS 缓存
+			new Setting(body)
+				.setName("TTS 缓存")
+				.setDesc(`LRU 缓存 TTS 音频，容量 128 条。当前 ${getTTSCacheSize()} 条。`)
+				.addButton((btn) =>
+					btn
+						.setButtonText("清空缓存")
+						.setWarning()
+						.onClick(async () => {
+							clearTTSCache();
+							new Notice("TTS 缓存已清空");
+							this.update();
+						}),
+				);
+
+			// 翻译缓存
+			new Setting(body)
+				.setName("翻译缓存")
+				.setDesc(`LRU 缓存翻译结果，容量 1024 条。当前 ${this.plugin.translateCache?.size() ?? 0} 条。`)
+				.addButton((btn) =>
+					btn
+						.setButtonText("清空缓存")
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.translateCache?.clear();
+							new Notice("已清空翻译缓存");
+							this.update();
+						}),
+				);
+		}
+
+		// ====== 离线词典 ======
+		{
+			const body = createSettingsSection(root, "离线词典");
+
+			// Jitendex 词典：一个按钮承担安装/更新（首次使用=安装，已安装=更新）
+			{
+				const s = new Setting(body).setName("Jitendex 词典").setDesc("检测中…");
+				// 按钮引用：在 addButton 回调里赋值，供 refreshDictStatus 切换文案
+				let jitendexBtn: ButtonComponent | null = null;
+
+				/** 刷新 Jitendex 行：desc 显示已导入/最新版本，按钮文案随是否已安装切换 */
+				const refreshDictStatus = async (forceLatest = false): Promise<void> => {
+					const mgr = this.plugin.dictionaryManager;
+					if (!mgr || !mgr.isReady) {
+						s.setDesc("词典未初始化");
+						return;
+					}
+					let info: JitendexSourceInfo | null = null;
+					try {
+						info = await mgr.getSourceInfo();
+					} catch (e) {
+						s.setDesc("获取词典源信息失败");
+						console.warn("[nihong-ai] 获取 Jitendex 源信息失败:", e);
+						return;
+					}
+					s.setDesc(this.formatJitendexDesc(info, forceLatest));
+					// 已导入 → 「更新词典」；未导入 → 「安装词典」
+					jitendexBtn?.setButtonText(
+						info.installedRevision ? "更新词典" : "安装词典",
+					);
+				};
+
+				s.addButton((btn) => {
+					jitendexBtn = btn;
+					btn.setButtonText("安装词典")
+						.setCta()
+						.setTooltip("从 Jitendex 官方源下载并导入最新版")
+						.onClick(async () => {
+							const mgr = this.plugin.dictionaryManager;
+							if (!mgr) {
+								return;
+							}
+							const installing =
+								btn.buttonEl.textContent?.includes("安装") ?? false;
+							// 各阶段对应的文案：更新到设置行描述（描述行更宽，
+							// 状态文本不会被截断；按钮在禁用态下文本显示不出来，故不更新按钮）
+							const stageText: Record<string, string> = {
+								fetching: "检测版本中…",
+								downloading: "下载词典中…",
+								installing: "安装词典中…",
+								done: "完成",
+							};
+							const setStage = (stage: string): void => {
+								s.setDesc(stageText[stage] ?? "处理中…");
+							};
+							setStage("fetching");
+							btn.setDisabled(true);
+							try {
+								const res = await mgr.updateJitendex((stage) => {
+									setStage(stage);
+								});
+								if (res.updated) {
+									new Notice(
+										`已${installing ? "安装" : "更新"}到 ${res.revision ?? "(未知版本)"}`,
+										5000,
+									);
+								} else {
+									new Notice(`已是最新版本: ${res.revision ?? "(未知)"}`);
+								}
+							} catch (e) {
+								const msg = e instanceof Error ? e.message : String(e);
+								new Notice(`${installing ? "安装" : "更新"}失败: ${msg}`, 8000);
+								console.error("[nihong-ai] Jitendex 更新失败:", e);
+							} finally {
+								btn.setDisabled(false);
+								await refreshDictStatus();
+							}
+						});
+				});
+				void refreshDictStatus();
+			}
+
+			// 清空词典
+			new Setting(body)
+				.setName("清空词典")
+				.setDesc("清空 IndexedDB 中的所有词典数据。")
+				.addButton((btn) =>
+					btn
+						.setButtonText("清空")
+						.setWarning()
+						.onClick(async () => {
+							const mgr = this.plugin.dictionaryManager;
+							if (!mgr) {
+								return;
+							}
+							await mgr.clear();
+							new Notice("已清空词典");
+							this.update();
+						}),
+				);
+		}
 	}
 
 	/** 格式化 Jitendex 源信息为设置行描述文本 */
@@ -783,13 +785,13 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 
 	/**
 	 * 渲染整个「大模型分组」区块（当前分组下拉+复制/新增按钮、分组编辑区、三个模型分配下拉）。
-	 * 供 ModelGroupSettingPage 子页面 display() 调用，host 为子页面 containerEl。
+	 * 供 renderSettings 的「大模型分组」分区调用，host 为分区 body。
 	 */
-	renderModelGroupSection(host: HTMLElement): void {
+	private renderModelGroupSection(host: HTMLElement): void {
 		// 当前分组：下拉 + 复制当前 + 新增分组
 		new Setting(host)
 			.setName("当前分组")
-			.setDesc("选择当前正在编辑的分组（下方编辑区显示该分组信息）。")
+			.setDesc("选择当前正在编辑的分组。")
 			.addDropdown((dropdown) => {
 				this.activeDropdown = dropdown;
 				this.refreshDropdownOptions();
@@ -824,7 +826,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						});
 						this.plugin.settings.activeModelGroupId = id;
 						await this.plugin.saveSettings();
-						this.rerenderActiveModelGroupOrTab();
+						this.update();
 					}),
 			)
 			.addButton((btn) =>
@@ -844,7 +846,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						});
 						this.plugin.settings.activeModelGroupId = id;
 						await this.plugin.saveSettings();
-						this.rerenderActiveModelGroupOrTab();
+						this.update();
 					}),
 			);
 
@@ -898,18 +900,6 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
-	}
-
-	/**
-	 * 分组结构变更（新增/复制/删除/重命名）后重渲染：
-	 * 子页面打开时重渲染子页面（保留在子页面内、不跳回主页），否则重渲染整个设置 tab。
-	 */
-	private rerenderActiveModelGroupOrTab(): void {
-		if (this.activeModelGroupPage) {
-			this.activeModelGroupPage.rerender();
-		} else {
-			this.update();
-		}
 	}
 
 	/** 只渲染当前激活的分组（标题行 + 3 个字段行） */
@@ -970,7 +960,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						g.name = v;
 						await this.plugin.saveSettings();
 						// 分组名变更：刷新当前分组下拉框选项 + 重渲染分组编辑区（子页面打开时重渲染页面，否则重渲染整个 tab）
-						this.rerenderActiveModelGroupOrTab();
+						this.update();
 					})();
 				});
 			})
@@ -1000,7 +990,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 						}
 						await this.plugin.saveSettings();
 						// 删除分组：重渲染分组编辑区（子页面打开时重渲染页面，否则重渲染整个 tab）
-						this.rerenderActiveModelGroupOrTab();
+						this.update();
 					});
 			});
 
@@ -1100,50 +1090,4 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 			exists ? cur : (this.plugin.settings.modelGroups[0]?.id ?? ""),
 		);
 	}
-
-	/**
-	 * 「大模型分组」命令式子页面（嵌套类，可访问本 tab 的私有成员）。
-	 * 大模型分组管理（当前分组下拉 + 分组编辑区 + 三个模型分配下拉）是复杂动态编辑器，
-	 * 用 declarative render 回调承载会因 render 被多次调用导致分组编辑区重复显示。
-	 * 改用 SettingPage 命令式子页面：display() 直接往 containerEl 渲染，避开该问题。
-	 * 分组结构变更（新增/复制/删除/重命名）调 rerender() 重渲染本页面（不跳回主页）。
-	 */
-	private modelGroupPage(): ModelGroupSettingPage {
-		const p = new ModelGroupSettingPage(this);
-		this.activeModelGroupPage = p;
-		return p;
-	}
 }
-
-/**
- * 「大模型分组」命令式子页面。display() 调 tab.renderModelGroupSection(containerEl) 渲染。
- * 分组结构变更时 tab 调 page.rerender() 重渲染本页面。
- */
-class ModelGroupSettingPage extends SettingPage {
-	private tab: NihongAIExplainSettingTab;
-
-	constructor(tab: NihongAIExplainSettingTab) {
-		super();
-		this.tab = tab;
-		this.title = "大模型分组";
-	}
-
-	display(): void {
-		this.containerEl.empty();
-		this.tab.renderModelGroupSection(this.containerEl);
-	}
-
-	/** 分组结构变更后重渲染本页面（保留在子页面内） */
-	rerender(): void {
-		this.display();
-	}
-
-	hide(): void {
-		this.tab.activeModelGroupPage = null;
-		this.tab.activeGroupContainer = null;
-		this.tab.activeDropdown = null;
-		this.tab.activeModelListPanel = null;
-		this.tab.activeModelInput = null;
-	}
-}
-
