@@ -481,7 +481,6 @@
 	margin: 10px 0;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 8px;
-	padding: 0 12px;
 	min-width: 0;
 }
 .nihong-ai-settings-section > .nihong-ai-settings-section-heading {
@@ -498,6 +497,7 @@
 	font-weight: 600;
 	font-size: var(--font-ui-small);
 	list-style: none;
+	padding-left: 10px;
 }
 .nihong-ai-settings-section > summary::-webkit-details-marker {
 	display: none;
@@ -537,7 +537,6 @@
 }
 .nihong-ai-settings-section-body {
 	display: block;
-	padding: 0 4px 10px 20px;
 	border-top: 1px solid var(--background-modifier-border);
 }
 .nihong-ai-settings-section-body > .setting-item:first-child {

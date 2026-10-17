@@ -5,7 +5,7 @@ import { Deinflector } from "./deinflector";
 import { AccentDb } from "./accents";
 import { compareRevisions } from "./revision";
 import { ACCENTS_B64_GZ } from "./data/accentsData";
-import { logWarn, logError, errMsg } from "../log";
+import { logInfo, logWarn, logError, errMsg } from "../log";
 import type {
 	DictionaryMeta,
 	LookupResult,
@@ -50,6 +50,134 @@ export type JitendexStage =
 
 /** 安装/更新进度回调：每个阶段切换时调用一次 */
 export type JitendexProgressCb = (stage: JitendexStage) => void;
+
+/** 分片下载的请求函数签名（与 obsidian 的 requestUrl 一致，抽出可注入以便测试 mock） */
+export type ChunkRequestFn = (params: {
+	url: string;
+	method: string;
+	headers?: Record<string, string>;
+	throw?: boolean;
+}) => Promise<{ status: number; arrayBuffer: ArrayBuffer; headers: Record<string, string> }>;
+
+/** 分片下载的文件适配器（与 Obsidian DataAdapter 的写入/删除方法子集一致，可注入 mock） */
+export interface ChunkFileAdapter {
+	writeBinary(path: string, data: ArrayBuffer): Promise<void>;
+	appendBinary(path: string, data: ArrayBuffer): Promise<void>;
+	remove(path: string): Promise<void>;
+}
+
+/** 分片下载选项 */
+interface ChunkDownloadOptions {
+	/** 单片大小（字节） */
+	chunkSize: number;
+	/** 单分片失败的最大重试次数（含首次） */
+	maxRetries: number;
+	/** 单分片重试间隔（ms） */
+	retryInterval: number;
+}
+
+/**
+ * 分片下载（HTTP Range）到文件：先 HEAD 拿总大小，按 chunkSize 分片逐块下载并追加写入。
+ *
+ * 移动端 requestUrl/fetch 会把整个响应体 base64 编码后传回 JS 层——整包下载几十 MB 的
+ * zip 会让 Java 堆（256MB 限制）OOM 闪退。按 5MB 分片，每片 base64 后约 6.7MB，避免 OOM。
+ *
+ * 单分片请求失败重试最多 maxRetries 次（含首次），每次失败后等待 retryInterval；
+ * 超出重试次数后清理已下载的部分文件并抛错（整体失败）。
+ *
+ * 抽为模块级纯函数（接收 requestFn / adapter 注入），便于单元测试 mock。
+ */
+export async function downloadChunked(
+	requestFn: ChunkRequestFn,
+	adapter: ChunkFileAdapter,
+	url: string,
+	path: string,
+	opts: ChunkDownloadOptions,
+): Promise<void> {
+	// 1. HEAD 拿总大小（Content-Length）
+	const headResp = await requestFn({ url, method: "HEAD", throw: false });
+	if (headResp.status < 200 || headResp.status >= 300) {
+		throw new Error(`HEAD 失败: HTTP ${headResp.status}`);
+	}
+	const totalStr = headResp.headers["content-length"] ?? headResp.headers["Content-Length"];
+	const total = totalStr ? parseInt(totalStr, 10) : NaN;
+	if (!Number.isFinite(total) || total <= 0) {
+		throw new Error(`无法获取文件大小（Content-Length=${totalStr ?? "缺失"}），可能不支持分片下载`);
+	}
+
+	// 2. 分片下载并追加写入文件
+	const { chunkSize, maxRetries, retryInterval } = opts;
+	let downloaded = 0;
+	let first = true;
+	const cleanup = async (reason: string): Promise<void> => {
+		logWarn("dict", `分片下载失败，清理已下载文件: ${reason}`);
+		try {
+			await adapter.remove(path);
+		} catch {
+			// 文件可能不存在，忽略清理错误
+		}
+	};
+	try {
+		while (downloaded < total) {
+			const end = Math.min(downloaded + chunkSize - 1, total - 1);
+			// 单分片请求重试：最多 maxRetries 次（含首次）
+			let buf: ArrayBuffer | null = null;
+			let status = 0;
+			for (let attempt = 1; attempt <= maxRetries; attempt++) {
+				try {
+					const resp = await requestFn({
+						url,
+						method: "GET",
+						headers: { Range: `bytes=${downloaded}-${end}` },
+						throw: false,
+					});
+					// 206 Partial Content（分片）或 200（服务器忽略 Range 返回整包）
+					if (resp.status !== 206 && resp.status !== 200) {
+						throw new Error(`HTTP ${resp.status}`);
+					}
+					if (!resp.arrayBuffer || resp.arrayBuffer.byteLength === 0) {
+						throw new Error("响应体为空");
+					}
+					buf = resp.arrayBuffer;
+					status = resp.status;
+					break;
+				} catch (e) {
+					if (attempt < maxRetries) {
+						logWarn("dict", `分片下载失败（第 ${attempt}/${maxRetries} 次，bytes=${downloaded}-${end}），重试: ${errMsg(e)}`);
+						await sleep(retryInterval);
+					} else {
+						throw new Error(`分片下载失败（已重试 ${maxRetries} 次，bytes=${downloaded}-${end}）: ${errMsg(e)}`);
+					}
+				}
+			}
+			if (!buf) {
+				throw new Error(`分片下载失败: 未能获取数据（bytes=${downloaded}-${end}）`);
+			}
+			if (first) {
+				// 第一片覆盖写（清掉旧文件）
+				await adapter.writeBinary(path, buf);
+				first = false;
+			} else {
+				// 后续片追加写
+				await adapter.appendBinary(path, buf);
+			}
+			downloaded += buf.byteLength;
+			// 服务器若忽略 Range 返回整包（200），一次就下完，跳出循环
+			if (status === 200) {
+				break;
+			}
+		}
+	} catch (e) {
+		await cleanup(errMsg(e));
+		throw new Error(`下载失败: ${errMsg(e)}`);
+	}
+
+	if (downloaded === 0) {
+		await cleanup("未下载到任何数据");
+		throw new Error("下载失败: 未下载到任何数据");
+	}
+	logInfo("dict", `分片下载完成: ${downloaded}/${total} 字节`);
+}
 
 /** Jitendex 词典源元信息（供设置页展示与更新判断） */
 export interface JitendexSourceInfo {
@@ -234,9 +362,25 @@ export class DictionaryManager {
 		return normalizePath(`${this.pluginDir}/${JITENDEX_ZIP_NAME}`);
 	}
 
+	/** 分片大小（5MB）：移动端 requestUrl/fetch 会把响应体 base64 编码后传回 JS 层，
+	 * 整包下载几十 MB 的 zip 会让 Java 堆（256MB 限制）OOM 闪退。按 5MB 分片下载，
+	 * 每片 base64 后约 6.7MB，远低于堆限制，避免 OOM。GitHub release assets 支持 Range 请求。 */
+	private static readonly CHUNK_SIZE = 5 * 1024 * 1024;
+	/** 单分片下载失败的最大重试次数（含首次） */
+	private static readonly CHUNK_MAX_RETRIES = 3;
+	/** 单分片重试间隔（ms） */
+	private static readonly CHUNK_RETRY_INTERVAL = 2000;
+
 	/**
 	 * 下载 jitendex-yomitan.zip 到插件目录（覆盖旧 zip），返回 zip 路径。
-	 * 用 requestUrl 拉取（桌面/移动均可用，无 Node 依赖）。
+	 *
+	 * 分片下载（HTTP Range）：先 HEAD 拿总大小，按 5MB 分片逐块下载并追加写入文件。
+	 * 移动端 Obsidian 的 requestUrl/fetch 都由 Capacitor 的 requestUrlAndroid 实现，
+	 * 会把整个响应体 base64 编码后传回 JS 层——整包下载几十 MB 的 zip 时 Java 堆
+	 * （256MB 限制）OOM 闪退（崩溃栈：Base64.encodeToString → OutOfMemoryError）。
+	 * 按 5MB 分片，每片 base64 后约 6.7MB，远低于堆限制，避免 OOM。
+	 * 桌面端同样走分片（统一路径，桌面端整包也正常但分片无害）。
+	 * 单分片失败重试最多 3 次，超出后清理已下载文件、整体失败。
 	 */
 	async downloadJitendexZip(): Promise<string> {
 		if (!this.app || !this.pluginDir) {
@@ -247,19 +391,11 @@ export class DictionaryManager {
 		if (!zipPath) {
 			throw new Error("插件目录未配置");
 		}
-		const resp = await requestUrl({
-			url: JITENDEX_DOWNLOAD_URL,
-			method: "GET",
-			throw: false,
+		await downloadChunked(requestUrl, adapter, JITENDEX_DOWNLOAD_URL, zipPath, {
+			chunkSize: DictionaryManager.CHUNK_SIZE,
+			maxRetries: DictionaryManager.CHUNK_MAX_RETRIES,
+			retryInterval: DictionaryManager.CHUNK_RETRY_INTERVAL,
 		});
-		if (resp.status < 200 || resp.status >= 300) {
-			throw new Error(`下载失败: HTTP ${resp.status}`);
-		}
-		const buf = resp.arrayBuffer;
-		if (!buf || buf.byteLength === 0) {
-			throw new Error(`下载失败: 响应体为空（HTTP ${resp.status}）`);
-		}
-		await adapter.writeBinary(zipPath, buf);
 		return zipPath;
 	}
 
