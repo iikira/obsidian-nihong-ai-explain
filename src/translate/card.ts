@@ -10,7 +10,14 @@ type State = "loading" | "result" | "error";
  */
 export class TranslateCard {
 	private el: HTMLDivElement | null = null;
-	private scrollHandler = (): void => this.hide();
+	private scrollHandler = (e: Event): void => {
+		// 只在主文档滚动时隐藏卡片；忽略子容器（如日志面板、设置页内部）的滚动，
+		// 否则日志面板追加日志自动滚动会触发 document scroll capture 导致卡片误关。
+		const target = e.target;
+		if (target === document || target === document.documentElement || target === document.body) {
+			this.hide();
+		}
+	};
 
 	/** 在选区附近显示 loading 状态 */
 	showLoading(rect: DOMRect): void {

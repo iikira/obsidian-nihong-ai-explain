@@ -23,11 +23,12 @@ function toAccentCircle(position: number): string {
 export class DictionaryPopup {
 	private el: HTMLDivElement | null = null;
 	private scrollHandler = (e: Event): void => {
-		// 卡片内部滚动条滚动不触发 hide
-		if (e.target instanceof Element && e.target.closest(`.${CARD_CLASS}`)) {
-			return;
+		// 只在主文档滚动时隐藏卡片；忽略子容器（如卡片内部、日志面板、设置页）的滚动，
+		// 否则日志面板追加日志自动滚动会触发 document scroll capture 导致卡片误关。
+		const target = e.target;
+		if (target === document || target === document.documentElement || target === document.body) {
+			this.hide();
 		}
-		this.hide();
 	};
 	private externalClickHandler: ((e: MouseEvent) => void) | null = null;
 	private copyHandler = (e: ClipboardEvent): void => {

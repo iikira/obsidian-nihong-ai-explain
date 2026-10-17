@@ -23,6 +23,10 @@ class ModelGroupEditor {
 	private activeModelListPanel: HTMLDivElement | null = null;
 	/** 当前激活分组「模型 id」输入框引用（选择模型时回填用） */
 	private activeModelInput: HTMLInputElement | null = null;
+	/** 三个模型分配下拉框（AI 讲解/翻译/语法拆解），改分组名时同步刷新选项 */
+	private explainDropdown: DropdownComponent | null = null;
+	private translateDropdown: DropdownComponent | null = null;
+	private grammarDropdown: DropdownComponent | null = null;
 
 	constructor(private ctx: SettingsContext) {}
 
@@ -104,6 +108,7 @@ class ModelGroupEditor {
 			.setName("AI 讲解大模型")
 			.setDesc("AI 讲解功能使用此分组的大模型。")
 			.addDropdown((dropdown) => {
+				this.explainDropdown = dropdown;
 				for (const g of plugin.settings.modelGroups) {
 					dropdown.addOption(g.id, g.name || g.modelId || g.id);
 				}
@@ -119,6 +124,7 @@ class ModelGroupEditor {
 			.setName("翻译大模型")
 			.setDesc("翻译功能使用此分组的大模型。")
 			.addDropdown((dropdown) => {
+				this.translateDropdown = dropdown;
 				for (const g of plugin.settings.modelGroups) {
 					dropdown.addOption(g.id, g.name || g.modelId || g.id);
 				}
@@ -134,6 +140,7 @@ class ModelGroupEditor {
 			.setName("语法拆解大模型")
 			.setDesc("语法拆解功能使用此分组的大模型。")
 			.addDropdown((dropdown) => {
+				this.grammarDropdown = dropdown;
 				for (const g of plugin.settings.modelGroups) {
 					dropdown.addOption(g.id, g.name || g.modelId || g.id);
 				}
@@ -287,8 +294,9 @@ class ModelGroupEditor {
 						}
 						g.name = v;
 						await plugin.saveSettings();
-						// 分组名变更：刷新当前分组下拉框选项 + 重渲染分组编辑区
-						update();
+						// 分组名变更：刷新当前分组下拉框选项（局部更新，不整树重渲染——
+						// 重渲染会销毁 DOM 导致焦点跳到首个输入框触发 FolderSuggest）
+						this.refreshDropdownOptions();
 					})();
 				});
 			})
@@ -396,27 +404,28 @@ class ModelGroupEditor {
 		return `${base} (${i})`;
 	}
 
-	/** 重建当前分组下拉框的选项（清空后重新 add），保留当前选中值 */
+	/** 重建所有分组下拉框的选项（当前分组 + AI 讲解/翻译/语法拆解分配），
+	 * 保留各自的当前选中值。改分组名/增删分组时调用，避免整树重渲染。 */
 	private refreshDropdownOptions(): void {
-		const dropdown = this.activeDropdown;
-		if (!dropdown) {
-			return;
-		}
-		const cur = dropdown.getValue();
-		// 清空旧 options
-		while (dropdown.selectEl.firstChild) {
-			dropdown.selectEl.removeChild(dropdown.selectEl.firstChild);
-		}
-		for (const g of this.ctx.plugin.settings.modelGroups) {
-			dropdown.addOption(g.id, g.name || g.modelId || g.id);
-		}
-		// 恢复选中（若仍存在）
-		const exists = this.ctx.plugin.settings.modelGroups.some(
-			(g) => g.id === cur,
-		);
-		dropdown.setValue(
-			exists ? cur : (this.ctx.plugin.settings.modelGroups[0]?.id ?? ""),
-		);
+		const groups = this.ctx.plugin.settings.modelGroups;
+		const rebuild = (dropdown: DropdownComponent | null, selectedId: string): void => {
+			if (!dropdown) {
+				return;
+			}
+			const exists = groups.some((g) => g.id === selectedId);
+			// 清空旧 options
+			while (dropdown.selectEl.firstChild) {
+				dropdown.selectEl.removeChild(dropdown.selectEl.firstChild);
+			}
+			for (const g of groups) {
+				dropdown.addOption(g.id, g.name || g.modelId || g.id);
+			}
+			dropdown.setValue(exists ? selectedId : (groups[0]?.id ?? ""));
+		};
+		rebuild(this.activeDropdown, this.ctx.plugin.settings.activeModelGroupId);
+		rebuild(this.explainDropdown, this.ctx.plugin.settings.explainModelGroupId);
+		rebuild(this.translateDropdown, this.ctx.plugin.settings.translateModelGroupId);
+		rebuild(this.grammarDropdown, this.ctx.plugin.settings.grammarModelGroupId);
 	}
 }
 

@@ -168,14 +168,15 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	} else {
 		const url = buildTTSURL(text);
 		logInfo("tts", `google 引擎请求 URL ${url}`);
+		const t0 = Date.now();
 		const resp = await requestUrl({
 			url,
 			method: "GET",
 			headers: TTS_HEADERS,
 		});
 		logInfo(
-			"nihong-ai-explain tts",
-			`google 响应 status=${resp.status} byteLength=${resp.arrayBuffer?.byteLength}`,
+			"tts",
+			`google 响应 status=${resp.status} byteLength=${resp.arrayBuffer?.byteLength} 耗时=${Date.now() - t0}ms`,
 		);
 		buf = resp.arrayBuffer;
 	}
