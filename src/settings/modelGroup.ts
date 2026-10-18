@@ -34,7 +34,7 @@ class ModelGroupEditor {
 	 * 渲染整个「大模型分组」区块（当前分组下拉+复制/新增按钮、分组编辑区、三个模型分配下拉）。
 	 */
 	render(body: HTMLElement): void {
-		const { plugin, update } = this.ctx;
+		const { plugin } = this.ctx;
 		// 当前分组：下拉 + 复制当前 + 新增分组
 		new Setting(body)
 			.setName("当前分组")
@@ -73,7 +73,10 @@ class ModelGroupEditor {
 						});
 						plugin.settings.activeModelGroupId = id;
 						await plugin.saveSettings();
-						update();
+						// 局部更新：刷新下拉选项 + 重渲染分组编辑区，不整树重渲染
+						// （整树重渲染会重建所有输入框，导致焦点跳到首个输入框触发 FolderSuggest）
+						this.refreshDropdownOptions();
+						this.rerenderActiveGroup();
 					}),
 			)
 			.addButton((btn) =>
@@ -93,7 +96,9 @@ class ModelGroupEditor {
 						});
 						plugin.settings.activeModelGroupId = id;
 						await plugin.saveSettings();
-						update();
+						// 局部更新：刷新下拉选项 + 重渲染分组编辑区，不整树重渲染
+						this.refreshDropdownOptions();
+						this.rerenderActiveGroup();
 					}),
 			);
 
@@ -239,7 +244,7 @@ class ModelGroupEditor {
 	/** 只渲染当前激活的分组（标题行 + 3 个字段行） */
 	private renderActiveGroup(): void {
 		const host = this.activeGroupContainer;
-		const { plugin, update } = this.ctx;
+		const { plugin } = this.ctx;
 		if (!host) {
 			return;
 		}
@@ -325,8 +330,9 @@ class ModelGroupEditor {
 							s.translateModelGroupId = fallback;
 						}
 						await plugin.saveSettings();
-						// 删除分组：重渲染分组编辑区
-						update();
+						// 删除分组：局部更新（刷新下拉选项 + 重渲染分组编辑区），不整树重渲染
+						this.refreshDropdownOptions();
+						this.rerenderActiveGroup();
 					});
 			});
 
