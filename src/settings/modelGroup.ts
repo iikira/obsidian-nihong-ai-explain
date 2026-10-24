@@ -269,6 +269,8 @@ class ModelGroupEditor {
 				text.onChange(async (value) => {
 					g.apiUrl = value.trim();
 					await plugin.saveSettings();
+					// 端点变了，刷新模型候选（去抖：输入中间态不逐字符发请求）
+					this.scheduleModelSuggestRefresh();
 				});
 			});
 
@@ -289,7 +291,7 @@ class ModelGroupEditor {
 				// ModelSuggest 构造时按当前分组的 apiUrl+apiKey 取列表（命中全局缓存或网络拉取），
 				// 实例持有自己的列表，切换/新增分组时旧实例随 DOM 销毁，不会串到别的分组。
 				// 点选后 setValue 不会触发 onChange，需在 onPick 里直接保存
-				new ModelSuggest(this.ctx.app, search.inputEl, g.apiUrl, g.apiKey, (modelId) => {
+				this.modelSuggest = new ModelSuggest(this.ctx.app, search.inputEl, g.apiUrl, g.apiKey, (modelId) => {
 					search.setValue(modelId);
 					void apply(modelId);
 				});
@@ -308,8 +310,36 @@ class ModelGroupEditor {
 				text.onChange(async (value) => {
 					g.apiKey = value;
 					await plugin.saveSettings();
+					// key 变了，缓存维度变了，刷新模型候选（去抖合并连续输入）
+					this.scheduleModelSuggestRefresh();
 				});
 			});
+	}
+
+	/** 当前分组「模型 id」候选下拉实例（API 地址 / API Key 变更时刷新其列表） */
+	private modelSuggest: ModelSuggest | null = null;
+
+	/** 模型候选刷新去抖计时器 */
+	private modelSuggestRefreshTimer: number | null = null;
+
+	/**
+	 * 去抖刷新「模型 id」候选列表：API 地址 / API Key 变更后，等输入停顿 500ms 再按
+	 * 最新 apiUrl+apiKey 重新取列表（全局缓存命中则零请求；未命中才发网络请求）。
+	 * 去抖避免输入中间态（如逐字符敲 URL）逐次触发请求。
+	 */
+	private scheduleModelSuggestRefresh(): void {
+		if (this.modelSuggestRefreshTimer != null) {
+			window.clearTimeout(this.modelSuggestRefreshTimer);
+		}
+		this.modelSuggestRefreshTimer = window.setTimeout(() => {
+			this.modelSuggestRefreshTimer = null;
+			const g = this.ctx.plugin.settings.modelGroups.find(
+				(x) => x.id === this.ctx.plugin.settings.activeModelGroupId,
+			);
+			if (g) {
+				this.modelSuggest?.refresh(g.apiUrl, g.apiKey);
+			}
+		}, 500);
 	}
 
 	/** 在现有分组名基础上确保不重名：若撞名则加 (2)/(3)... 后缀 */

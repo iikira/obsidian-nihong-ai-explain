@@ -137,6 +137,16 @@ export class ModelSuggest extends AbstractInputSuggest<string> {
 		this.limit = 50;
 		// 构造时按当前分组的 apiUrl+apiKey 取列表填实例：全局缓存命中则立即就绪，
 		// 未命中则异步拉取，完成后回填实例（输入时尚未返回则下拉为空，不影响手动输入）。
+		this.refresh(apiUrl, apiKey);
+	}
+
+	/**
+	 * 按最新 apiUrl+apiKey 重新取模型列表回填实例：全局缓存按 apiUrl+apikey 作 key
+	 * 天然隔离（换端点/换 key 不命中，自动重新拉取；同 key 未过期直接命中）。
+	 * 用户编辑 API 地址 / API Key 后调用，让下拉候选跟上端点变化（建议去抖后调用，
+	 * 避免输入中间态逐字符触发请求）。拉取完成前的旧列表仅作过渡展示。
+	 */
+	refresh(apiUrl: string, apiKey: string): void {
 		void fetchModelIds(apiUrl, apiKey).then((list) => {
 			this.ids = list;
 		});
