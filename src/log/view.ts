@@ -3,6 +3,7 @@ import { logger, type LogEntry, type LogLevel } from "./index";
 import type { LRUTranslateCache } from "../translate/cache";
 import { getTTSCacheEntries, playTTSCacheBlob } from "../tts";
 import { subscribeCacheChange } from "../cacheEvents";
+import { matchTranslateWithTTS, matchTTSWithTranslate } from "../cacheMatch";
 
 /** 日志页签视图类型 id */
 export const LOG_VIEW_TYPE = "nihong-ai-log-view";
@@ -190,7 +191,7 @@ export class LogPanelView extends ItemView {
 		line.createSpan({ cls: "nihong-ai-log-text", text: entry.text });
 	}
 
-	/** 渲染翻译缓存条目（最近使用在前） */
+	/** 渲染翻译缓存条目（最近使用在前）；能命中朗读缓存的条目加 ▶ 朗读按钮 */
 	private renderTranslateCache(): void {
 		if (!this.translateListEl) {
 			return;
@@ -209,8 +210,19 @@ export class LogPanelView extends ItemView {
 			this.translateListEl.createDiv({ cls: "nihong-ai-log-empty", text: "暂无缓存" });
 			return;
 		}
-		for (const e of entries) {
+		// 命中朗读缓存：按 text 关联，命中的条目行首加 ▶ + 整行点击播放（复用朗读缓存的操作逻辑）
+		const matched = matchTranslateWithTTS(entries, getTTSCacheEntries());
+		for (const e of matched) {
 			const line = this.translateListEl.createDiv({ cls: "nihong-ai-log-cache-line" });
+			// 命中朗读缓存：行首 ▶ 图标 + 整行可点击播放（与朗读缓存行一致的交互）
+			if (e.ttsBlobUrl) {
+				const blobUrl = e.ttsBlobUrl;
+				line.addClass("nihong-ai-log-tts-playable");
+				line.createSpan({ cls: "nihong-ai-log-tts-play", text: "▶" });
+				line.addEventListener("click", () => {
+					playTTSCacheBlob(blobUrl);
+				});
+			}
 			const head = line.createDiv({ cls: "nihong-ai-log-cache-head" });
 			head.createSpan({ cls: "nihong-ai-log-cache-src", text: e.text });
 			if (e.target) {
@@ -220,7 +232,7 @@ export class LogPanelView extends ItemView {
 		}
 	}
 
-	/** 渲染朗读缓存条目（最近使用在前）；点击行直接播 blob URL */
+	/** 渲染朗读缓存条目（最近使用在前）；点击行直接播 blob URL；命中翻译缓存则展示译文 */
 	private renderTTSCache(): void {
 		if (!this.ttsListEl) {
 			return;
@@ -231,13 +243,20 @@ export class LogPanelView extends ItemView {
 			this.ttsListEl.createDiv({ cls: "nihong-ai-log-empty", text: "暂无缓存" });
 			return;
 		}
-		for (const e of entries) {
+		// 命中翻译缓存：按 text 关联，命中的条目展示译文
+		const translateEntries = this.host.translateCache?.entries() ?? [];
+		const matched = matchTTSWithTranslate(entries, translateEntries);
+		for (const e of matched) {
 			const line = this.ttsListEl.createDiv({ cls: "nihong-ai-log-cache-line nihong-ai-log-tts-line" });
 			line.createSpan({ cls: "nihong-ai-log-tts-play", text: "▶" });
 			const meta = line.createDiv({ cls: "nihong-ai-log-tts-meta" });
 			meta.createSpan({ cls: "nihong-ai-log-cache-src", text: e.text });
 			// 仅显示引擎标签（Google/Edge/Windows）；voice 短名（如 ja-JP-NanamiNeural）对用户无意义，不展示
 			meta.createSpan({ cls: "nihong-ai-log-cache-tag nihong-ai-log-tts-engine", text: engineLabel(e.engine) });
+			// 命中翻译缓存：展示译文
+			if (e.translation) {
+				line.createDiv({ cls: "nihong-ai-log-cache-val", text: e.translation });
+			}
 			// 点击整行重播该 blob URL
 			line.addEventListener("click", () => {
 				playTTSCacheBlob(e.blobUrl);

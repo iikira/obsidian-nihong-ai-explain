@@ -618,6 +618,7 @@
 /* 朗读缓存行：可点击重播 */
 .nihong-ai-log-tts-line {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: baseline;
 	gap: 6px;
 	cursor: pointer;
@@ -633,12 +634,36 @@
 	font-size: 1.1em;
 }
 
+/* 翻译缓存命中朗读缓存时：行首 ▶ + head 同行排列，整行可点击播放 */
+.nihong-ai-log-tts-playable {
+	cursor: pointer;
+}
+
+.nihong-ai-log-tts-playable:hover {
+	background: var(--background-modifier-hover);
+}
+
+.nihong-ai-log-tts-playable > .nihong-ai-log-tts-play {
+	float: left;
+	margin-right: 6px;
+	line-height: 1.6;
+}
+
+.nihong-ai-log-tts-playable > .nihong-ai-log-cache-head {
+	overflow: hidden;
+}
+
 .nihong-ai-log-tts-meta {
 	flex: 1 1 auto;
 	min-width: 0;
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
+}
+
+/* 命中翻译缓存时，译文独占一行（flex-basis 100% 换行），与翻译缓存视图一致 */
+.nihong-ai-log-tts-line > .nihong-ai-log-cache-val {
+	flex: 1 0 100%;
 }
 
 /* ====== 可取消的生成进度通知 ====== */

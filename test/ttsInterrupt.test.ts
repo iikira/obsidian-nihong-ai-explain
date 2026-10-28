@@ -149,7 +149,7 @@ function rejectAfter(ms: number): Promise<never> {
 }
 
 test("打断结算：speakText(A) 播放中 stopSpeak() 后 Promise 应结算（不挂起）", async () => {
-	__seedTtsCacheForTest("A", "blob:A");
+	await __seedTtsCacheForTest("A", new ArrayBuffer(8));
 	const p = speakText("A");
 	await tickToWait();
 	// 打断（不派发任何 audio 事件），应通过 currentResolver 唤醒段等待
@@ -159,7 +159,7 @@ test("打断结算：speakText(A) 播放中 stopSpeak() 后 Promise 应结算（
 });
 
 test("自然结束结算：dispatch('ended') 后 Promise 应结算", async () => {
-	__seedTtsCacheForTest("C", "blob:C");
+	await __seedTtsCacheForTest("C", new ArrayBuffer(8));
 	const p = speakText("C");
 	await tickToWait();
 	// 手动派发 ended（模拟自然播放结束）——验证 ended 路径未因新增 currentResolver 逻辑破坏
@@ -168,8 +168,8 @@ test("自然结束结算：dispatch('ended') 后 Promise 应结算", async () =>
 });
 
 test("连续打断结算：speakText(A) → speakText(B) 两个 Promise 均结算", async () => {
-	__seedTtsCacheForTest("A", "blob:A");
-	__seedTtsCacheForTest("B", "blob:B");
+	await __seedTtsCacheForTest("A", new ArrayBuffer(8));
+	await __seedTtsCacheForTest("B", new ArrayBuffer(8));
 	const pa = speakText("A");
 	await tickToWait();
 	const pb = speakText("B"); // 内部 stopSpeak() 打断 A
@@ -180,7 +180,7 @@ test("连续打断结算：speakText(A) → speakText(B) 两个 Promise 均结�
 });
 
 test("error 路径结算：dispatch('error') 后 Promise 应结算不抛", async () => {
-	__seedTtsCacheForTest("E", "blob:E");
+	await __seedTtsCacheForTest("E", new ArrayBuffer(8));
 	const p = speakText("E");
 	await tickToWait();
 	// 手动派发 error（音频解码错误路径）——onError 内 cleanup+resolve

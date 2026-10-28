@@ -20,10 +20,11 @@ export function renderCacheSection(ctx: SettingsContext, body: HTMLElement): voi
 				.setButtonText("清空缓存")
 				.setDestructive()
 				.onClick(() => {
-					clearTTSCache();
-					new Notice("TTS 缓存已清空");
-					// 只更新本行描述条数，不重渲染整个设置树（避免焦点重置到首个输入框触发下拉）
-					ttsSetting.setDesc(ttsDesc(getTTSCacheSize()));
+					void clearTTSCache().then(() => {
+						new Notice("TTS 缓存已清空");
+						// 只更新本行描述条数，不重渲染整个设置树（避免焦点重置到首个输入框触发下拉）
+						ttsSetting.setDesc(ttsDesc(getTTSCacheSize()));
+					});
 				}),
 		);
 

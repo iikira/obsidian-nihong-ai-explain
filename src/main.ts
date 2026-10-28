@@ -25,6 +25,7 @@ import {
 	speakText,
 	stopSpeak,
 	setTTSConfig,
+	initTTSCache,
 	getTTSCacheSize,
 	clearTTSCache,
 } from "./tts";
@@ -56,6 +57,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 			rate: this.settings.ttsRate,
 			googleDomain: this.settings.ttsGoogleDomain,
 		});
+		// 初始化 TTS 持久化缓存：从 IndexedDB 加载字节、重建 blobUrl（加载前缓存空）
+		void initTTSCache();
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 
 		this.translateService = new TranslateService({
@@ -382,8 +385,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 	}
 
 	/** 清空 TTS 缓存 */
-	clearTTSCache(): void {
-		clearTTSCache();
+	clearTTSCache(): Promise<void> {
+		return clearTTSCache();
 	}
 
 	/** 应用「禁用 Lexis 悬浮窗」开关到当前 pill */

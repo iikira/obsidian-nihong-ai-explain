@@ -1,6 +1,7 @@
 import { Notice, requestUrl } from "obsidian";
 import { logInfo, logError, errMsg } from "../log";
 import { emitCacheChange } from "../cacheEvents";
+import { PersistentTTSCache, IndexedDBTTSCacheStorage, type TTSCacheStorage } from "./cache";
 import { synthesizeEdge, formatEdgeRate } from "./edge";
 import {
 	synthesizeWindows,
@@ -17,8 +18,6 @@ const SPLIT_PATTERNS = [
 	/([，,；;、])/,
 	/([\s])/,
 ];
-
-const TTS_CACHE_SIZE = 128;
 
 const TTS_HEADERS = {
 	Referer: "https://translate.google.com/",
@@ -47,7 +46,8 @@ let currentToken = 0;
 let currentResolver: (() => void) | null = null;
 /** 当前 TTS 配置（引擎/语音/语速） */
 let currentConfig: TtsConfig = { engine: "google", voice: "", rate: 1.0, googleDomain: "" };
-const ttsCache = new Map<string, string>();
+/** TTS 朗读缓存：内存 blobUrl + IndexedDB 字节持久化（key = engine::voice::text），LRU 淘汰 */
+const ttsCache = new PersistentTTSCache();
 
 function splitForTTS(text: string): string[] {
 	const trimmed = text.trim();
@@ -102,33 +102,15 @@ function cacheKey(text: string): string {
 
 function getCache(text: string): string | null {
 	const k = cacheKey(text);
-	const url = ttsCache.get(k);
-	if (url === undefined) {
-		return null;
-	}
-	ttsCache.delete(k);
-	ttsCache.set(k, url);
-	return url;
+	return ttsCache.get(k);
 }
 
-function setCache(text: string, url: string): void {
+/** 写入缓存：存字节到持久层 + 建 blobUrl 到内存层；返回 blobUrl 供播放。LRU 淘汰两层同步 */
+async function setCache(text: string, buffer: ArrayBuffer): Promise<string> {
 	const k = cacheKey(text);
-	if (ttsCache.has(k)) {
-		ttsCache.delete(k);
-	}
-	ttsCache.set(k, url);
-	while (ttsCache.size > TTS_CACHE_SIZE) {
-		const firstKey = ttsCache.keys().next().value;
-		if (firstKey === undefined) {
-			break;
-		}
-		const oldUrl = ttsCache.get(firstKey);
-		if (oldUrl) {
-			URL.revokeObjectURL(oldUrl);
-		}
-		ttsCache.delete(firstKey);
-	}
+	const url = await ttsCache.set(k, buffer);
 	emitCacheChange("tts");
+	return url;
 }
 
 /** 设置 TTS 配置（引擎/语音/语速），由设置页与 onload 调用 */
@@ -141,16 +123,33 @@ export function setTTSRate(rate: number): void {
 	currentConfig = { ...currentConfig, rate };
 }
 
-export function clearTTSCache(): void {
-	for (const url of ttsCache.values()) {
-		URL.revokeObjectURL(url);
-	}
-	ttsCache.clear();
+/**
+ * 初始化 TTS 持久化缓存：注入 IndexedDB 适配器并从持久层加载重建 blobUrl。
+ * 由 main.ts onload 调用。加载前 getCache 命中 null（调用方重新合成），加载后命中持久层。
+ */
+export async function initTTSCache(): Promise<void> {
+	ttsCache.setStorage(new IndexedDBTTSCacheStorage());
+	await ttsCache.load();
+}
+
+/** 测试用：注入自定义存储适配器（绕过 IndexedDB） */
+export function setTTSCacheStorageForTest(storage: TTSCacheStorage): void {
+	ttsCache.setStorage(storage);
+}
+
+/** 测试用：从持久层加载（注入存储后调用） */
+export async function loadTTSCacheForTest(): Promise<void> {
+	await ttsCache.load();
+}
+
+/** 清空 TTS 缓存：revoke 全部 blobUrl + 清内存 + 清持久层 */
+export async function clearTTSCache(): Promise<void> {
+	await ttsCache.clear();
 	emitCacheChange("tts");
 }
 
 export function getTTSCacheSize(): number {
-	return ttsCache.size;
+	return ttsCache.size();
 }
 
 /** TTS 缓存条目（供日志面板「朗读缓存」tab 展示 + 点击重播） */
@@ -171,11 +170,9 @@ export interface TTSCacheEntry {
  * 仅返回当前仍存活（未被 LRU 淘汰 revoke）的条目。
  */
 export function getTTSCacheEntries(): TTSCacheEntry[] {
-	// ttsCache 是 LRU Map：getCache/setCache 都 delete+set 提升到末尾，故末尾=最近使用。
-	// 逆序遍历使最近使用在前。
-	const pairs = [...ttsCache.entries()].reverse();
+	// ttsCache.entries() 已按 LRU 逆序（最近使用在前）
 	const entries: TTSCacheEntry[] = [];
-	for (const [key, blobUrl] of pairs) {
+	for (const { key, blobUrl } of ttsCache.entries()) {
 		const sep1 = key.indexOf("::");
 		const sep2 = key.indexOf("::", sep1 + 2);
 		if (sep1 < 0 || sep2 < 0) {
@@ -226,9 +223,10 @@ export function playTTSCacheBlob(blobUrl: string): void {
 }
 
 /** 仅测试用：预置 TTS 缓存，使 fetchTTSBlob 命中缓存跳过 requestUrl。生产代码不应调用。
- *  seed 前需先 setTTSConfig 设好 engine/voice（cacheKey 以二者为前缀）。 */
-export function __seedTtsCacheForTest(text: string, url: string): void {
-	setCache(text, url);
+ *  seed 前需先 setTTSConfig 设好 engine/voice（cacheKey 以二者为前缀）。
+ *  注意：持久化缓存存字节+建 blobUrl，故 seed 传字节（测试用任意非空 buffer 即可）。 */
+export async function __seedTtsCacheForTest(text: string, buffer: ArrayBuffer): Promise<string> {
+	return setCache(text, buffer);
 }
 
 async function fetchTTSBlob(text: string): Promise<string> {
@@ -263,11 +261,8 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	if (!buf || buf.byteLength === 0) {
 		throw new Error(`${engine} TTS 响应体为空`);
 	}
-	// google/edge 返回 mp3，windows 返回 wav
-	const mime = engine === "windows" ? "audio/wav" : "audio/mpeg";
-	const blob = new Blob([buf], { type: mime });
-	const blobUrl = URL.createObjectURL(blob);
-	setCache(text, blobUrl);
+	// 存字节到持久层 + 建 blobUrl 到内存层，返回 blobUrl 供播放
+	const blobUrl = await setCache(text, buf);
 	return blobUrl;
 }
 
