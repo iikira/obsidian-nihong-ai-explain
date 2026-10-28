@@ -528,3 +528,132 @@
 .nihong-ai-log-level-error .nihong-ai-log-text {
 	color: var(--text-error, #e05252);
 }
+
+/* ====== 日志面板 tab 栏 ====== */
+
+.nihong-ai-log-tabbar {
+	display: flex;
+	gap: 2px;
+	padding: 4px 8px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nihong-ai-log-tab {
+	appearance: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 4px 10px;
+	cursor: pointer;
+	border-radius: 4px 4px 0 0;
+}
+
+.nihong-ai-log-tab:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.nihong-ai-log-tab.is-active {
+	color: var(--text-normal);
+	border-bottom-color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+.nihong-ai-log-panel {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.nihong-ai-log-panel > .nihong-ai-log-list {
+	flex: 1 1 auto;
+}
+
+/* ====== 缓存条目展示 ====== */
+
+.nihong-ai-log-empty {
+	color: var(--text-faint);
+	padding: 16px 8px;
+	text-align: center;
+	font-style: italic;
+}
+
+.nihong-ai-log-cache-line {
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nihong-ai-log-cache-line:last-child {
+	border-bottom: none;
+}
+
+.nihong-ai-log-cache-head {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	margin-bottom: 2px;
+}
+
+.nihong-ai-log-cache-src {
+	font-weight: 600;
+	color: var(--text-normal);
+	word-break: break-word;
+}
+
+.nihong-ai-log-cache-tag {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	flex: 0 0 auto;
+}
+
+.nihong-ai-log-cache-val {
+	color: var(--text-muted);
+	word-break: break-word;
+	white-space: pre-wrap;
+}
+
+/* 朗读缓存行：可点击重播 */
+.nihong-ai-log-tts-line {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	cursor: pointer;
+}
+
+.nihong-ai-log-tts-line:hover {
+	background: var(--background-modifier-hover);
+}
+
+.nihong-ai-log-tts-play {
+	flex: 0 0 auto;
+	color: var(--interactive-accent);
+	font-size: 1.1em;
+}
+
+.nihong-ai-log-tts-meta {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+/* ====== 可取消的生成进度通知 ====== */
+
+.nihong-ai-cancel-btn {
+	margin-left: 12px;
+	padding: 2px 12px;
+	font-size: var(--font-ui-small);
+	color: var(--text-on-accent);
+	background: var(--interactive-accent);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.nihong-ai-cancel-btn:hover {
+	opacity: 0.85;
+}

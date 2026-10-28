@@ -8,6 +8,7 @@ import {
 	type UsageInfo,
 } from "../shared";
 import { toAccentCircle, renderTermEntry } from "./renderTerm";
+import { CancelledError, showCancellableProgress, throwIfCancelled } from "../cancel";
 import type { ModelGroup } from "../settings";
 import type { LookupResult } from "../dictionary/types";
 import { logWarn, logError, logInfo, errMsg } from "../log";
@@ -49,17 +50,20 @@ export class ExplainService {
 	/**
 	 * 发起大模型调用（非流式 requestUrl，无跨域限制），带重试；返回 content + usage。
 	 * 重试、耗时、成败统一记进 logger；token 用量在调用方 setUsage 后 flush。
+	 * @param isCancelled 可选取消检查：重试 attempt 之间检查，已取消则停止重试
 	 */
 	private async callModel(
 		messages: ChatMessage[],
 		group: ModelGroup,
 		logger: CallLogger,
+		isCancelled?: () => boolean,
 	): Promise<{ content: string; usage: UsageInfo | null }> {
 		const { temperature, maxRetries, retryInterval } = this.opts.settings();
 		return callChatCompletion(messages, group, temperature, {
 			maxRetries,
 			retryInterval,
 			logger,
+			isCancelled,
 		});
 	}
 
@@ -136,8 +140,10 @@ export class ExplainService {
 			const cfg = this.opts.settings();
 			if (clean.length > MAX_WORD_LEN) {
 				new Notice(
-					`选区过长（${clean.length} 字符），已截断使用前 ${MAX_WORD_LEN} 字符`,
+					`选区过长（${clean.length} 字符），AI 讲解最多 ${MAX_WORD_LEN} 字符`,
+					8000,
 				);
+				return;
 			}
 			if (hasForbiddenFileNameChar(clean)) {
 				new Notice(
@@ -155,11 +161,12 @@ export class ExplainService {
 				return;
 			}
 
-			new Notice("正在生成…");
+			const { notice, token } = showCancellableProgress("explain");
 			const group = this.opts.getModelGroup();
 
 			// 查离线词典，命中则把结果作为参考拼进 user prompt
 			const dictRef = await this.buildDictionaryReference(clean);
+			throwIfCancelled(token);
 			let userContent: string;
 			if (dictRef) {
 				userContent =
@@ -180,12 +187,19 @@ export class ExplainService {
 			let content = "";
 			const logger = new CallLogger("llm");
 			try {
-				const res = await this.callModel(messages, group, logger);
+				const res = await this.callModel(messages, group, logger, () => token.cancelled);
+				throwIfCancelled(token);
 				content = res.content;
 				if (res.usage) {
 					logger.setUsage(res.usage);
 				}
 			} catch (e) {
+				if (e instanceof CancelledError) {
+					notice.hide();
+					new Notice("已取消");
+					logger.flush();
+					return;
+				}
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);
 				logError("explain", `生成失败: ${errMsg(e)}`);
@@ -194,19 +208,27 @@ export class ExplainService {
 			}
 			logger.flush();
 
+			throwIfCancelled(token);
 			const dir = (cfg.outputDir ?? "").trim();
 			try {
 				if (dir) {
 					await ensureFolder(vault, dir);
 				}
+				throwIfCancelled(token);
 				await vault.create(targetPath, content);
 			} catch (e) {
+				if (e instanceof CancelledError) {
+					notice.hide();
+					new Notice("已取消");
+					return;
+				}
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`写入文件失败: ${msg}`, 8000);
 				logError("explain", `写入失败: ${errMsg(e)}`);
 				return;
 			}
 
+			notice.hide();
 			new Notice(`已生成: ${targetPath}`);
 		} finally {
 			this.opts.finishTask("explain", clean);

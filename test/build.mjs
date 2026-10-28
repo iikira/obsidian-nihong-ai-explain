@@ -20,6 +20,24 @@ if (testFiles.length === 0) {
 
 // 桩：obsidian / electron 在 Node 测试环境不存在，置空模块避免 require 失败。
 // 待测函数都是纯函数，不实际调用 Obsidian API；若误用会在测试中抛错（被测试捕获）。
+//
+// 另：tts/index.ts 经 windows.ts 引入 onecoreTtsB64.ts（构建时生成、gitignore 不提交），
+// 且 tts/index.ts 引入 edge-tts-universal（npm 包）。干净 checkout 下跑 test 不会先生成
+// onecoreTtsB64.ts，直接 bundle 会失败。故对以下模块也置桩：
+//   - onecoreTtsB64（构建产物，可能不存在）
+//   - src/tts/windows（依赖 window.require/child_process，测试环境无意义）
+//   - edge-tts-universal（会真实触网，测试要离线）
+// 用 path 正则匹配 onResolve（esbuild 解析后的路径），重定向到 stub-stub 命名空间。
+const stubModules = [
+	// filter 匹配 esbuild onResolve 的 path：
+	//   - 相对说明符（./windows、./onecore/onecoreTtsB64）此时尚未加扩展名
+	//   - 包名说明符（edge-tts-universal）原样传入
+	// esbuild 在插件 onResolve 返回 path 后才解析，故 args.path 是说明符原样。
+	{ filter: /(^|\/)windows$/, contents: "module.exports = { synthesizeWindows: async () => new ArrayBuffer(0), isWindowsTTSAvailable: () => false, listWindowsVoices: async () => [], probeWindowsTTSOnce: async () => false };" },
+	{ filter: /(^|\/)onecoreTtsB64$/, contents: "module.exports = { ONECORE_TTS_B64: '' };" },
+	{ filter: /^edge-tts-universal$/, contents: "module.exports = { default: { Synthesis: function() {} }, Synthesis: function() {} };" },
+];
+
 const stubPlugin = {
 	name: "stub-obsidian",
 	setup(build) {
@@ -28,13 +46,26 @@ const stubPlugin = {
 			namespace: "stub-obsidian",
 		}));
 		build.onLoad({ filter: /.*/, namespace: "stub-obsidian" }, () => ({
-			contents: "module.exports = {};",
+			// 导出最小桩：speakText/各模块用到的 Notice（类）、requestUrl 等；
+			// 测试不应真实触网，requestUrl 在测试中通过缓存命中绕开
+			contents: "module.exports = { Notice: function Notice() {}, requestUrl: async () => ({ status: 200, json: { data: [] }, arrayBuffer: new ArrayBuffer(0) }) };",
 			loader: "js",
 		}));
 		build.onResolve({ filter: /^electron$/ }, (args) => ({
 			path: args.path,
 			namespace: "stub-obsidian",
 		}));
+		// 其余置桩模块：重定向到独立命名空间，onLoad 按 path 匹配返回对应内容
+		for (const mod of stubModules) {
+			build.onResolve({ filter: mod.filter }, (args) => ({
+				path: args.path,
+				namespace: "stub-modules",
+			}));
+		}
+		build.onLoad({ filter: /.*/, namespace: "stub-modules" }, (args) => {
+			const mod = stubModules.find((m) => m.filter.test(args.path));
+			return { contents: mod ? mod.contents : "module.exports = {};", loader: "js" };
+		});
 	},
 };
 

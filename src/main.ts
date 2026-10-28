@@ -222,6 +222,27 @@ export default class NihongAIExplainPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "speak-selection",
+			name: "朗读选中文字",
+			callback: () => {
+				const sel = window.getSelection()?.toString().trim() ?? "";
+				if (!sel) {
+					new Notice("请先选中一段文字");
+					return;
+				}
+				void this.speakText(sel);
+			},
+		});
+
+		this.addCommand({
+			id: "stop-speak",
+			name: "停止朗读",
+			callback: () => {
+				this.stopSpeak();
+			},
+		});
+
+		this.addCommand({
 			id: "open-log-panel",
 			name: "打开日志面板",
 			callback: () => {
@@ -285,7 +306,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 	 * 注册日志页签视图 + ribbon 图标。	 * ribbon 图标点击在右栏打开日志页签；命令「打开日志面板」同样打开。
 	 */
 	private registerLogView(): void {
-		this.registerView(LOG_VIEW_TYPE, (leaf) => new LogPanelView(leaf));
+		this.registerView(LOG_VIEW_TYPE, (leaf) => new LogPanelView(leaf, this));
 		this.addRibbonIcon("scroll-text", "Nihong AI 日志", () => {
 			void this.openLogView();
 		});

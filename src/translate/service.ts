@@ -4,13 +4,16 @@ import { LRUTranslateCache, AppStorageAdapter } from "./cache";
 import { TRANSLATE_SYSTEM_PROMPT } from "../prompts";
 import { centerRect } from "../popupUtils";
 import type { ModelGroup } from "../settings";
-import { logInfo, logError, errMsg } from "../log";
+import { logError, errMsg } from "../log";
 import {
 	CallLogger,
 	callChatCompletion,
 	type ChatMessage,
 	type UsageInfo,
 } from "../shared";
+
+/** 翻译输入文本最大字符数：超过直接报错（避免单次请求 token 过大、过慢、易超上下文窗口） */
+const TRANSLATE_MAX_INPUT_LEN = 5000;
 
 /** 翻译用到的设置项子集 */
 interface TranslateConfig {
@@ -84,6 +87,13 @@ export class TranslateService {
 		}
 		try {
 			const target = this.opts.settings().targetLanguage || "中文";
+			if (clean.length > TRANSLATE_MAX_INPUT_LEN) {
+				new Notice(
+					`选区过长（${clean.length} 字符），翻译最多 ${TRANSLATE_MAX_INPUT_LEN} 字符`,
+					8000,
+				);
+				return;
+			}
 			const cacheKey = JSON.stringify({ text: clean, target });
 			const rect = this.opts.getSelectionRect() ?? centerRect();
 
@@ -91,8 +101,6 @@ export class TranslateService {
 			const cached = this.cache.get(cacheKey);
 			if (cached != null) {
 				this.card.showResult(cached, rect);
-				// LRU 缓存命中：无 API 调用，无 token 用量
-				logInfo("translate", "翻译 LRU 缓存命中，无 API 调用");
 				return;
 			}
 

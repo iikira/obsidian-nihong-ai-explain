@@ -19,8 +19,8 @@ export default defineConfig([
 						"test/*.mjs",
 					],
 					// test/*.ts 与配置/构建脚本不在 tsconfig include 内，走 default project；
-					// 数量略超默认上限 8，放宽到 16（仍可控，性能影响小）。
-					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 16,
+					// 数量略超默认上限 8，放宽到 24（含 test/*.ts + eslint/esbuild 配置脚本，留余量）。
+					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 24,
 				},
 			},
 		},
@@ -66,6 +66,9 @@ export default defineConfig([
 			"obsidianmd/no-nodejs-modules": "off",
 			"obsidianmd/no-global-this": "off",
 			"obsidianmd/rule-custom-message": "off",
+			// prefer-window-timers 是 Obsidian 弹窗兼容规则（要求用 window.setTimeout 而非全局），
+			// Node 测试环境全局 setTimeout/clearTimeout 才是真实计时器（rejectAfter 需真实延迟），豁免。
+			"obsidianmd/prefer-window-timers": "off",
 			"@typescript-eslint/no-floating-promises": "off",
 			"no-undef": "off",
 		},

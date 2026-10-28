@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import { logWarn, errMsg } from "../log";
+import { emitCacheChange } from "../cacheEvents";
 
 const STORAGE_KEY = "nihong-ai-translate-cache";
 const CAPACITY = 1024;
@@ -77,6 +78,7 @@ export class LRUTranslateCache {
 	}
 
 	set(key: string, value: string): void {
+		const prev = this.map.get(key);
 		if (this.map.has(key)) {
 			this.map.delete(key);
 		}
@@ -90,6 +92,10 @@ export class LRUTranslateCache {
 			this.map.delete(oldest);
 		}
 		this.scheduleFlush();
+		// 仅值变化（新条目或内容更新）才通知，避免 get 的 LRU 提升同值触发无效刷新
+		if (prev !== value) {
+			emitCacheChange("translate");
+		}
 	}
 
 	clear(): void {
@@ -105,10 +111,39 @@ export class LRUTranslateCache {
 				logWarn("translate", `清空翻译缓存失败: ${errMsg(e)}`);
 			}
 		}
+		emitCacheChange("translate");
 	}
 
 	size(): number {
 		return this.map.size;
+	}
+
+	/**
+	 * 返回所有缓存条目，按 LRU 顺序（最近使用在前）返回。
+	 * key 是 `JSON.stringify({text, target})`，解析出原文与目标语言。
+	 * 供日志面板「翻译缓存」tab 展示。
+	 */
+	entries(): { text: string; target: string; value: string }[] {
+		const out: { text: string; target: string; value: string }[] = [];
+		// Map 迭代顺序 = LRU 顺序（最近 set/get 的在末尾），逆序即最近使用在前
+		const pairs = [...this.map.entries()].reverse();
+		for (const [k, v] of pairs) {
+			let text = k;
+			let target = "";
+			try {
+				const parsed = JSON.parse(k) as { text?: string; target?: string };
+				if (typeof parsed.text === "string") {
+					text = parsed.text;
+				}
+				if (typeof parsed.target === "string") {
+					target = parsed.target;
+				}
+			} catch {
+				// key 不是 JSON（理论不会发生），退化为原样展示
+			}
+			out.push({ text, target, value: v });
+		}
+		return out;
 	}
 
 	/** 立即写入存储（卸载时调用） */

@@ -195,6 +195,8 @@ export async function callChatCompletion(
 		maxRetries: number;
 		retryInterval: number;
 		logger: CallLogger;
+		/** 可选取消检查：在每次重试 attempt 之间检查，已取消则不再发起下一次（底层 requestUrl 无法 abort，已发出的请求可能仍跑完但结果被忽略） */
+		isCancelled?: () => boolean;
 	},
 ): Promise<{ content: string; usage: UsageInfo | null }> {
 	const url = `${group.apiUrl.replace(/\/$/, "")}/chat/completions`;
@@ -216,6 +218,10 @@ export async function callChatCompletion(
 	const logger = opts.logger;
 	let lastErr: unknown = null;
 	for (let attempt = 1; attempt <= max; attempt++) {
+		// 重试前检查取消：已取消则停止重试（首次 attempt 不检查——首次调用方应在 await 前已检查）
+		if (attempt > 1 && opts.isCancelled?.()) {
+			throw new Error("已取消");
+		}
 		const t0 = performance.now();
 		try {
 			const resp = await requestUrl({

@@ -1,6 +1,6 @@
 import { Notice, TFile, type Vault } from "obsidian";
 import { GRAMMAR_SYSTEM_PROMPT } from "../prompts";
-import { ensureFolder, hasForbiddenFileNameChar, MAX_WORD_LEN, resolveTargetPath } from "../utils";
+import { ensureFolder, hasForbiddenFileNameChar, resolveTargetPath } from "../utils";
 import {
 	CallLogger,
 	callChatCompletion,
@@ -9,6 +9,10 @@ import {
 } from "../shared";
 import type { ModelGroup } from "../settings";
 import { logError, errMsg } from "../log";
+import { CancelledError, showCancellableProgress, throwIfCancelled } from "../cancel";
+
+/** 语法拆解输入文本最大字符数：超过直接报错（语法拆解面向单句，过长无意义且浪费 token） */
+const GRAMMAR_MAX_INPUT_LEN = 200;
 
 /** 语法拆解用到的设置项子集 */
 interface GrammarConfig {
@@ -42,17 +46,20 @@ export class GrammarService {
 	/**
 	 * 发起大模型调用（非流式 requestUrl，无跨域限制），带重试；返回 content + usage。
 	 * 重试、耗时、成败统一记进 logger；token 用量在调用方 setUsage 后 flush。
+	 * @param isCancelled 可选取消检查：重试 attempt 之间检查，已取消则停止重试
 	 */
 	private async callModel(
 		messages: ChatMessage[],
 		group: ModelGroup,
 		logger: CallLogger,
+		isCancelled?: () => boolean,
 	): Promise<{ content: string; usage: UsageInfo | null }> {
 		const { temperature, maxRetries, retryInterval } = this.opts.settings();
 		return callChatCompletion(messages, group, temperature, {
 			maxRetries,
 			retryInterval,
 			logger,
+			isCancelled,
 		});
 	}
 
@@ -68,10 +75,12 @@ export class GrammarService {
 		}
 		try {
 			const cfg = this.opts.settings();
-			if (clean.length > MAX_WORD_LEN) {
+			if (clean.length > GRAMMAR_MAX_INPUT_LEN) {
 				new Notice(
-					`选区过长（${clean.length} 字符），已截断使用前 ${MAX_WORD_LEN} 字符`,
+					`选区过长（${clean.length} 字符），语法拆解最多 ${GRAMMAR_MAX_INPUT_LEN} 字符`,
+					8000,
 				);
+				return;
 			}
 			if (hasForbiddenFileNameChar(clean)) {
 				new Notice(
@@ -89,7 +98,7 @@ export class GrammarService {
 				return;
 			}
 
-			new Notice("正在生成…");
+			const { notice, token } = showCancellableProgress("grammar");
 			const group = this.opts.getModelGroup();
 
 			const messages: ChatMessage[] = [
@@ -100,12 +109,19 @@ export class GrammarService {
 			let content = "";
 			const logger = new CallLogger("llm");
 			try {
-				const res = await this.callModel(messages, group, logger);
+				const res = await this.callModel(messages, group, logger, () => token.cancelled);
+				throwIfCancelled(token);
 				content = res.content;
 				if (res.usage) {
 					logger.setUsage(res.usage);
 				}
 			} catch (e) {
+				if (e instanceof CancelledError) {
+					notice.hide();
+					new Notice("已取消");
+					logger.flush();
+					return;
+				}
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`生成失败: ${msg}`, 8000);
 				logError("grammar", `语法拆解失败: ${errMsg(e)}`);
@@ -114,19 +130,27 @@ export class GrammarService {
 			}
 			logger.flush();
 
+			throwIfCancelled(token);
 			const dir = (cfg.grammarOutputDir ?? "").trim();
 			try {
 				if (dir) {
 					await ensureFolder(vault, dir);
 				}
+				throwIfCancelled(token);
 				await vault.create(targetPath, content);
 			} catch (e) {
+				if (e instanceof CancelledError) {
+					notice.hide();
+					new Notice("已取消");
+					return;
+				}
 				const msg = e instanceof Error ? e.message : String(e);
 				new Notice(`写入文件失败: ${msg}`, 8000);
 				logError("grammar", `写入失败: ${errMsg(e)}`);
 				return;
 			}
 
+			notice.hide();
 			new Notice(`已生成: ${targetPath}`);
 		} finally {
 			this.opts.finishTask("grammar", clean);
