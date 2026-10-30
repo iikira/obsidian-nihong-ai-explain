@@ -8,6 +8,7 @@ import {
 	type UsageInfo,
 } from "../shared";
 import { toAccentCircle, renderTermEntry } from "./renderTerm";
+import { renderNamesDictTerm } from "../dictionary/tagZh";
 import { CancelledError, showCancellableProgress, throwIfCancelled } from "../cancel";
 import type { ModelGroup } from "../settings";
 import type { LookupResult } from "../dictionary/types";
@@ -110,16 +111,27 @@ export class ExplainService {
 		const lines: string[] = [];
 		for (const [key, groupTerms] of groups) {
 			const [expression, reading] = key.split("|");
-			const accents = this.opts.getAccents(expression, reading);
-			const accentStr = accents.length
-				? " " + accents.map((p) => toAccentCircle(p)).join(",")
-				: "";
-			lines.push(`${expression} | ${reading}${accentStr}`);
+			// JMnedict 风格：reading 为空，glossary 是读音列表（与 popup 一致：tag + 读音）
+			const isNamesDict = reading === "";
+			if (!isNamesDict) {
+				const accents = this.opts.getAccents(expression, reading);
+				const accentStr = accents.length
+					? " " + accents.map((p) => toAccentCircle(p)).join(",")
+					: "";
+				lines.push(`${expression} | ${reading}${accentStr}`);
+			} else {
+				lines.push(`${expression}`);
+			}
 			// 同一词头下多个 LookupResult（含不同变形来源）合并渲染。
-			// 词性、义项序号、释义、例句都在 glossary 结构化内容里，交由 renderTermEntry 解析。
 			for (const term of groupTerms) {
-				for (const line of renderTermEntry(term.glossary)) {
-					lines.push(line);
+				if (isNamesDict) {
+					// names dict：tag + 读音列表（与 popup 一致，无序号），纯函数渲染保证一致
+					lines.push(renderNamesDictTerm(term.tags, term.glossary));
+				} else {
+					// Jitendex：词性、义项序号、释义、例句在 glossary 结构化内容里，交由 renderTermEntry 解析
+					for (const line of renderTermEntry(term.glossary)) {
+						lines.push(line);
+					}
 				}
 			}
 		}

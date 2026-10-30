@@ -28,6 +28,12 @@ export interface DictionaryMeta {
 	url?: string;
 	description?: string;
 	attribution?: string;
+	/** 最新版本检查 URL（JMnedict 的 index.json 有，GET 后读 revision 字段） */
+	indexUrl?: string;
+	/** 词典 zip 下载 URL（JMnedict 的 index.json 有） */
+	downloadUrl?: string;
+	/** 是否支持在线更新检查（JMnedict 的 index.json 有） */
+	isUpdatable?: boolean;
 }
 
 /** 写入 IndexedDB 的处理后的词条 */

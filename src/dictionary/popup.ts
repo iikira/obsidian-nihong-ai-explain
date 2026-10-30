@@ -1,6 +1,7 @@
 import { positionCard } from "../popupUtils";
 import { getFuriganaSegments } from "./furigana";
-import type { LookupResult, ProcessedTag, ContentNode } from "./types";
+import { tagLabel } from "./tagZh";
+import type { LookupResult, ContentNode } from "./types";
 
 const CARD_CLASS = "nihong-ai-dict-popup";
 type State = "loading" | "result" | "error" | "empty";
@@ -39,7 +40,6 @@ export class DictionaryPopup {
 	};
 
 	constructor(
-		private getTag: (name: string) => ProcessedTag | undefined,
 		private onNavigate?: (query: string) => void,
 		private getFontSize?: () => number,
 		private getAccents?: (expression: string, reading: string) => number[],
@@ -169,9 +169,13 @@ export class DictionaryPopup {
 			const [expression, reading] = key.split("|");
 			const entryDiv = body.createDiv({ cls: "nihong-ai-dict-entry" });
 
+			// JMnedict 风格：reading 为空，glossary 存的是读音列表（非释义）。
+			// 此类条目 header 显示词头，下方各 term 的 tag + 读音列表（不当释义渲染）。
+			const isNamesDict = reading === "";
+
 			// 振假名 header
 			const header = entryDiv.createDiv({ cls: "nihong-ai-dict-header" });
-			if (expression !== reading) {
+			if (!isNamesDict && expression !== reading) {
 				const segments = getFuriganaSegments(expression, reading);
 				const wrapper = header.createSpan({ cls: "nihong-ai-dict-furigana" });
 				// 每个 segment 用独立 <ruby> 包裹：base 文本 + <rt>（有 reading 时）。
@@ -196,21 +200,27 @@ export class DictionaryPopup {
 			}
 
 			// 声调（pitch accent）：圆圈数字标记，多个候选用逗号分隔
-			const accents = this.getAccents?.(expression, reading);
-			if (accents && accents.length > 0) {
-				const accentSpan = header.createSpan({ cls: "nihong-ai-dict-accent" });
-				accentSpan.textContent = accents
-					.map((p) => toAccentCircle(p))
-					.join(",");
-				accentSpan.title = "声调（数字为声调核位置）";
+			if (!isNamesDict) {
+				const accents = this.getAccents?.(expression, reading);
+				if (accents && accents.length > 0) {
+					const accentSpan = header.createSpan({ cls: "nihong-ai-dict-accent" });
+					accentSpan.textContent = accents
+						.map((p) => toAccentCircle(p))
+						.join(",");
+					accentSpan.title = "声调（数字为声调核位置）";
+				}
 			}
 
-			// 释义列表
-			const ol = entryDiv.createEl("ol", { cls: "nihong-ai-dict-senses" });
+			// 释义列表：普通词典用 <ol>（有序号）；names dict 用 div（无序号，更像读音表）
+			const listEl = isNamesDict
+				? entryDiv.createDiv({ cls: "nihong-ai-dict-senses nihong-ai-dict-senses-names" })
+				: entryDiv.createEl("ol", { cls: "nihong-ai-dict-senses" });
 			for (const term of groupTerms) {
-				const li = ol.createEl("li", { cls: "nihong-ai-dict-sense" });
+				const li = isNamesDict
+					? listEl.createDiv({ cls: "nihong-ai-dict-sense" })
+					: listEl.createEl("li", { cls: "nihong-ai-dict-sense" });
 
-				// 词性标签
+				// 词性标签：names dict 显示中文释义（tag_bank notes 为空），Jitendex 保持原 tag 不映射
 				if (term.tags.length > 0) {
 					const tagSpan = li.createSpan({ cls: "nihong-ai-dict-tags" });
 					for (const t of term.tags) {
@@ -218,18 +228,20 @@ export class DictionaryPopup {
 							continue;
 						}
 						const tag = tagSpan.createSpan({ cls: "nihong-ai-dict-tag" });
-						tag.textContent = t;
-						const tagDef = this.getTag(t);
-						if (tagDef) {
-							tag.title = tagDef.notes || tagDef.short || "";
-						}
+						tag.textContent = isNamesDict ? tagLabel(t) : t;
 					}
 				}
 
 				// 释义内容
 				const glossDiv = li.createDiv({ cls: "nihong-ai-dict-glossary" });
-				for (const g of term.glossary) {
-					this.renderContentNode(glossDiv, g as ContentNode);
+				if (isNamesDict) {
+					// JMnedict：glossary 是读音列表，作为读音显示（顿号分隔）
+					const readings = term.glossary.filter((g): g is string => typeof g === "string");
+					glossDiv.createSpan({ text: readings.join("、") });
+				} else {
+					for (const g of term.glossary) {
+						this.renderContentNode(glossDiv, g as ContentNode);
+					}
 				}
 			}
 		}

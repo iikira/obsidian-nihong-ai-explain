@@ -41,6 +41,16 @@ const JITENDEX_RELEASES_API =
 	"https://api.github.com/repos/stephenmk/stephenmk.github.io/releases/latest";
 const JITENDEX_ZIP_NAME = "jitendex-yomitan.zip";
 
+/** JMnedict 词典源常量（GitHub release：yomidevs/jmdict-yomitan）
+ *  JMnedict 无 releases-API tag，更新检查走 indexUrl（GET 后读 revision 字段） */
+const JMNEDICT_ZIP_NAME = "JMnedict.zip";
+const JMNEDICT_DOWNLOAD_URL =
+	"https://github.com/yomidevs/jmdict-yomitan/releases/latest/download/JMnedict.zip";
+const JMNEDICT_INDEX_URL =
+	"https://github.com/yomidevs/jmdict-yomitan/releases/latest/download/JMnedict.json";
+/** JMnedict 独立 IndexedDB 库名（与 Jitendex 库 nihong-ai-dict 分离，互不影响） */
+const JMNEDICT_DB_NAME = "nihong-ai-dict-names";
+
 /** Jitendex 安装/更新的阶段（供 UI 显示进度文案） */
 export type JitendexStage =
 	| "fetching"    // 拉取最新版本号 / 读取本地 zip 版本
@@ -48,8 +58,8 @@ export type JitendexStage =
 	| "installing"  // 清空旧库 + 导入新数据
 	| "done";       // 完成
 
-/** 安装/更新进度回调：每个阶段切换时调用一次 */
-export type JitendexProgressCb = (stage: JitendexStage) => void;
+/** 安装/更新进度回调：dictName 标识哪本词典，stage 标识阶段 */
+export type DictProgressCb = (dictName: string, stage: JitendexStage) => void;
 
 /** 分片下载的请求函数签名（与 obsidian 的 requestUrl 一致，抽出可注入以便测试 mock） */
 export type ChunkRequestFn = (params: {
@@ -179,22 +189,46 @@ export async function downloadChunked(
 	logInfo("dict", `分片下载完成: ${downloaded}/${total} 字节`);
 }
 
-/** Jitendex 词典源元信息（供设置页展示与更新判断） */
-export interface JitendexSourceInfo {
+/** 单本词典源状态（供设置页展示与更新判断） */
+export interface DictSourceStatus {
+	/** 词典标识（占位名如 "Jitendex"/"JMnedict"；已导入则用实际 title） */
+	title: string;
+	/** 是否已导入 */
+	installed: boolean;
 	/** 已导入词典的 revision（无导入则 null） */
 	installedRevision: string | null;
-	/** GitHub 最新 release tag_name（拉取失败则 null） */
+	/** 最新版本（拉取失败则 null） */
 	latestRevision: string | null;
 	/** latestRevision 非空且与 installedRevision 不同 */
 	hasUpdate: boolean;
-	/** 已导入词典标题 */
-	title: string | null;
+}
+
+/** 聚合多词典源信息（供设置页展示与一键更新判断） */
+export interface DictSourceInfo {
+	/** 各词典源状态（Jitendex、JMnedict） */
+	sources: DictSourceStatus[];
+	/** 任意一个 hasUpdate */
+	anyHasUpdate: boolean;
+	/** 任意一个已导入 */
+	anyInstalled: boolean;
+}
+
+/** 单个词典源的更新描述（updateDictionaries 内部用，写死 Jitendex/JMnedict 各一组） */
+interface UpdateSource {
+	name: string;
+	zipName: string;
+	downloadUrl: string;
+	db: IDBPDatabase<YomitanDB> | null;
+	latestRevision: string | null;
+	installedRevision: string | null;
+	installed: boolean;
 }
 
 export class DictionaryManager {
 	private db: IDBPDatabase<YomitanDB> | null = null;
+	/** JMnedict 独立库（与 Jitendex 库分离，互不影响） */
+	private dbNames: IDBPDatabase<YomitanDB> | null = null;
 	private deinflector: Deinflector;
-	private tagCache: Map<string, ProcessedTag> = new Map();
 	private app: App | null = null;
 	private pluginDir: string | null = null;
 	private accentDb: AccentDb = new AccentDb();
@@ -202,6 +236,9 @@ export class DictionaryManager {
 	private latestRevisionCache: string | null = null;
 	/** latestRevisionCache 的过期时间戳（ms）；过期后重新拉取。拉取失败则缩短缓存时间 */
 	private latestRevisionCacheExpire = 0;
+	/** fetchJMnedictLatestRevision 的会话内缓存（独立于 Jitendex 缓存） */
+	private jmnedictLatestCache: string | null = null;
+	private jmnedictLatestCacheExpire = 0;
 	/** latestRevision 缓存有效期（成功拉取后）：10 分钟 */
 	private static readonly LATEST_REV_TTL = 10 * 60 * 1000;
 	/** latestRevision 拉取失败后的重试间隔（失败也短暂缓存，避免短时反复撞限流）：1 分钟 */
@@ -222,23 +259,29 @@ export class DictionaryManager {
 	async init(): Promise<void> {
 		try {
 			this.db = await openDB<YomitanDB>(DB_NAME, DB_VERSION, {
-				upgrade(db) {
-					const termStore = db.createObjectStore("terms", {
-						autoIncrement: true,
-					});
-					termStore.createIndex("expression", "expression", {
-						unique: false,
-					});
-					termStore.createIndex("reading", "reading", { unique: false });
-					db.createObjectStore("dictionaries", { keyPath: "title" });
-					db.createObjectStore("tag_defs", { keyPath: "name" });
-				},
+				upgrade: (db) => DictionaryManager.upgradeSchema(db),
 			});
-			await this.loadTags();
+			// JMnedict 独立库（与 Jitendex 库分离，互不影响；结构一致）
+			this.dbNames = await openDB<YomitanDB>(JMNEDICT_DB_NAME, 1, {
+				upgrade: (db) => DictionaryManager.upgradeSchema(db),
+			});
 			await this.loadAccents();
 		} catch (e) {
 			logError("dict", `IndexedDB 初始化失败: ${errMsg(e)}`);
 		}
+	}
+
+	/** 两库共用 IndexedDB schema：terms(expression/reading 索引) + dictionaries(title) + tag_defs(name) */
+	private static upgradeSchema(db: IDBPDatabase<YomitanDB>): void {
+		const termStore = db.createObjectStore("terms", {
+			autoIncrement: true,
+		});
+		termStore.createIndex("expression", "expression", {
+			unique: false,
+		});
+		termStore.createIndex("reading", "reading", { unique: false });
+		db.createObjectStore("dictionaries", { keyPath: "title" });
+		db.createObjectStore("tag_defs", { keyPath: "name" });
 	}
 
 	/** 用内置的 accents 文本（构建时 gzip+base64 打包进 bundle）加载声调索引 */
@@ -274,32 +317,54 @@ export class DictionaryManager {
 	}
 
 	async isImported(): Promise<boolean> {
+		// 任一库有词典即视为已导入
 		if (!this.db) {
 			return false;
 		}
 		try {
 			const count = await this.db.count("dictionaries");
-			return count > 0;
+			if (count > 0) {
+				return true;
+			}
+			if (this.dbNames) {
+				const count2 = await this.dbNames.count("dictionaries");
+				return count2 > 0;
+			}
+			return false;
 		} catch {
 			return false;
 		}
 	}
 
-	async getDictionaries(): Promise<DictionaryMeta[]> {
-		if (!this.db) {
+	/** 查单个库的 dictionaries */
+	private async getDictionariesInDb(db: IDBPDatabase<YomitanDB> | null): Promise<DictionaryMeta[]> {
+		if (!db) {
 			return [];
 		}
-		return await this.db.getAll("dictionaries");
+		return await db.getAll("dictionaries");
+	}
+
+	async getDictionaries(): Promise<DictionaryMeta[]> {
+		// 聚合两库的 dictionaries
+		const r1 = await this.getDictionariesInDb(this.db);
+		const r2 = await this.getDictionariesInDb(this.dbNames);
+		return [...r1, ...r2];
+	}
+
+	/** 清单个库的 terms + dictionaries + tag_defs */
+	private async clearDb(db: IDBPDatabase<YomitanDB> | null): Promise<void> {
+		if (!db) {
+			return;
+		}
+		await db.clear("terms");
+		await db.clear("dictionaries");
+		await db.clear("tag_defs");
 	}
 
 	async clear(): Promise<void> {
-		if (!this.db) {
-			return;
-		}
-		await this.db.clear("terms");
-		await this.db.clear("dictionaries");
-		await this.db.clear("tag_defs");
-		this.tagCache.clear();
+		// 清两个库（「清空词典」按钮用）
+		await this.clearDb(this.db);
+		await this.clearDb(this.dbNames);
 	}
 
 	/** 从插件目录扫描 zip 文件并导入（用户需先把 zip 复制到插件目录） */
@@ -348,18 +413,26 @@ export class DictionaryManager {
 		await this.importFromZipBuffer(buf);
 	}
 
-	/** 解压 zip 字节并导入 IndexedDB（供「从插件目录导入」与「下载导入」共用） */
+	/** 解压 zip 字节并导入 Jitendex 库（供「从插件目录导入」与「下载导入」共用） */
 	async importFromZipBuffer(buf: ArrayBuffer): Promise<void> {
-		const files = unzipSync(new Uint8Array(buf));
-		await this.processZipFiles(files);
+		await this.importFromZipBufferInto(this.db, buf);
 	}
 
-	/** Jitendex zip 在插件目录下的 vault 相对路径 */
-	private jitendexZipPath(): string | null {
+	/** 解压 zip 字节并导入指定库（库无关，Jitendex/JMnedict 库共用） */
+	private async importFromZipBufferInto(db: IDBPDatabase<YomitanDB> | null, buf: ArrayBuffer): Promise<void> {
+		if (!db) {
+			return;
+		}
+		const files = unzipSync(new Uint8Array(buf));
+		await this.processZipFiles(db, files);
+	}
+
+	/** 词典 zip 在插件目录下的 vault 相对路径（通用，按 zip 文件名） */
+	private dictZipPath(zipName: string): string | null {
 		if (!this.pluginDir) {
 			return null;
 		}
-		return normalizePath(`${this.pluginDir}/${JITENDEX_ZIP_NAME}`);
+		return normalizePath(`${this.pluginDir}/${zipName}`);
 	}
 
 	/** 分片大小（5MB）：移动端 requestUrl/fetch 会把响应体 base64 编码后传回 JS 层，
@@ -382,16 +455,17 @@ export class DictionaryManager {
 	 * 桌面端同样走分片（统一路径，桌面端整包也正常但分片无害）。
 	 * 单分片失败重试最多 3 次，超出后清理已下载文件、整体失败。
 	 */
-	async downloadJitendexZip(): Promise<string> {
+	/** 下载指定词典 zip 到插件目录（覆盖旧 zip），返回 zip 路径。库无关，按 url + zipName 下载 */
+	private async downloadDictZip(url: string, zipName: string): Promise<string> {
 		if (!this.app || !this.pluginDir) {
 			throw new Error("插件目录未配置，无法保存下载文件");
 		}
 		const adapter = this.app.vault.adapter;
-		const zipPath = this.jitendexZipPath();
+		const zipPath = this.dictZipPath(zipName);
 		if (!zipPath) {
 			throw new Error("插件目录未配置");
 		}
-		await downloadChunked(requestUrl, adapter, JITENDEX_DOWNLOAD_URL, zipPath, {
+		await downloadChunked(requestUrl, adapter, url, zipPath, {
 			chunkSize: DictionaryManager.CHUNK_SIZE,
 			maxRetries: DictionaryManager.CHUNK_MAX_RETRIES,
 			retryInterval: DictionaryManager.CHUNK_RETRY_INTERVAL,
@@ -456,82 +530,93 @@ export class DictionaryManager {
 		}
 	}
 
-	/** 聚合已导入版本与最新版本信息（供设置页展示与更新判断） */
-	async getSourceInfo(): Promise<JitendexSourceInfo> {
-		let installedRevision: string | null = null;
-		let title: string | null = null;
-		try {
-			const dicts = await this.getDictionaries();
-			if (dicts.length > 0) {
-				installedRevision = dicts[0].revision ?? null;
-				title = dicts[0].title ?? null;
-			}
-		} catch {
-			// 忽略，视为未导入
+	/**
+	 * JMnedict 最新版本：GET indexUrl（/latest/download/JMnedict.json，302 重定向，requestUrl 自动跟随）
+	 * → 读 revision 字段。失败返回 null，不抛。会话内缓存（同 Jitendex TTL 策略），独立缓存字段。
+	 */
+	async fetchJMnedictLatestRevision(): Promise<string | null> {
+		if (Date.now() < this.jmnedictLatestCacheExpire) {
+			return this.jmnedictLatestCache;
 		}
-		const latestRevision = await this.fetchLatestRevision();
-		const hasUpdate =
-			latestRevision !== null &&
-			latestRevision !== installedRevision;
-		return { installedRevision, latestRevision, hasUpdate, title };
+		try {
+			const resp = await requestUrl({
+				url: JMNEDICT_INDEX_URL,
+				method: "GET",
+				throw: false,
+			});
+			if (resp.status < 200 || resp.status >= 300) {
+				logWarn("dict", `拉取 JMnedict 最新版本失败: HTTP ${resp.status}`);
+				this.jmnedictLatestCache = null;
+				this.jmnedictLatestCacheExpire =
+					Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
+				return null;
+			}
+			const rev = (resp.json as { revision?: string }).revision ?? null;
+			const v = typeof rev === "string" && rev ? rev : null;
+			this.jmnedictLatestCache = v;
+			this.jmnedictLatestCacheExpire =
+				Date.now() + DictionaryManager.LATEST_REV_TTL;
+			return v;
+		} catch (e) {
+			logWarn("dict", `拉取 JMnedict 最新版本出错: ${errMsg(e)}`);
+			this.jmnedictLatestCache = null;
+			this.jmnedictLatestCacheExpire =
+				Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
+			return null;
+		}
+	}
+
+	/** 聚合各词典源已导入版本与最新版本信息（供设置页展示与一键更新判断） */
+	async getSourceInfo(): Promise<DictSourceInfo> {
+		// Jitendex：查 Jitendex 库（title 含 "Jitendex"）
+		const jitDicts = await this.getDictionariesInDb(this.db);
+		const jitInstalled = jitDicts.find((d) => d.title.includes("Jitendex"));
+		const jitLatest = await this.fetchLatestRevision();
+		const jitHasUpdate =
+			jitLatest !== null &&
+			jitInstalled != null &&
+			jitLatest !== (jitInstalled.revision ?? null);
+		// JMnedict：查 JMnedict 库（title 含 "JMnedict"）
+		const jmDicts = await this.getDictionariesInDb(this.dbNames);
+		const jmInstalled = jmDicts.find((d) => d.title.includes("JMnedict"));
+		const jmLatest = await this.fetchJMnedictLatestRevision();
+		const jmHasUpdate =
+			jmLatest !== null &&
+			jmInstalled != null &&
+			jmLatest !== (jmInstalled.revision ?? null);
+		const sources: DictSourceStatus[] = [
+			{
+				title: jitInstalled?.title ?? "Jitendex",
+				installed: jitInstalled != null,
+				installedRevision: jitInstalled?.revision ?? null,
+				latestRevision: jitLatest,
+				hasUpdate: jitHasUpdate,
+			},
+			{
+				title: jmInstalled?.title ?? "JMnedict",
+				installed: jmInstalled != null,
+				installedRevision: jmInstalled?.revision ?? null,
+				latestRevision: jmLatest,
+				hasUpdate: jmHasUpdate,
+			},
+		];
+		return {
+			sources,
+			anyHasUpdate: jitHasUpdate || jmHasUpdate,
+			anyInstalled: jitInstalled != null || jmInstalled != null,
+		};
 	}
 
 	/**
-	 * 安装或更新到最新版：
-	 * 1. 拉取最新版本号；若已导入版本与之一致则跳过（已是最新）
-	 * 2. 若插件目录下的本地 zip 版本已与最新版一致，则跳过下载，直接用本地 zip 导入
-	 * 3. 否则下载最新 zip 到插件目录（覆盖旧 zip）
-	 * 4. 清空旧 IndexedDB 数据，导入新 zip
-	 * 返回 { revision, updated }：updated=false 表示已是最新未变更，updated=true 表示重新导入完成
+	 * 读取插件目录下指定 zip 内 index.json 的 revision；无文件/解析失败返回 null。
+	 * 库无关，按 zipName 定位本地 zip。
 	 */
-	async updateJitendex(
-		onProgress?: JitendexProgressCb,
-	): Promise<{ revision: string | null; updated: boolean }> {
-		onProgress?.("fetching");
-		const latest = await this.fetchLatestRevision();
-		// 已导入版本与最新一致 → 跳过
-		if (latest) {
-			const installed = (await this.getDictionaries())[0]?.revision ?? null;
-			if (installed && installed === latest) {
-				return { revision: installed, updated: false };
-			}
-		}
-		// 选择 zip 来源：本地 zip 版本与最新一致 → 复用，跳过下载；
-		// 最新版本拉取失败但本地 zip 存在 → 退而用本地 zip（需校验版本不比已导入的低）；否则下载。
-		let zipPath: string | null = this.jitendexZipPath();
-		const localRev = await this.readLocalZipRevision();
-		if (latest && localRev && localRev === latest) {
-			// 本地 zip 版本与最新一致，跳过下载
-		} else if (!latest && localRev) {
-			// API 失败无法判断最新版，复用本地 zip 前先校验：本地 zip 版本不比已导入的低才装。
-			const installed =
-				(await this.getDictionaries())[0]?.revision ?? null;
-			if (installed && compareRevisions(localRev, installed) <= 0) {
-				return { revision: installed, updated: false };
-			}
-		} else {
-			onProgress?.("downloading");
-			zipPath = await this.downloadJitendexZip();
-		}
-		if (!zipPath) {
-			throw new Error("无法获取词典 zip（插件目录未配置）");
-		}
-		onProgress?.("installing");
-		await this.clear();
-		const buf = await this.app!.vault.adapter.readBinary(zipPath);
-		await this.importFromZipBuffer(buf);
-		const dicts = await this.getDictionaries();
-		onProgress?.("done");
-		return { revision: dicts[0]?.revision ?? null, updated: true };
-	}
-
-	/** 读取插件目录下 jitendex-yomitan.zip 内 index.json 的 revision；无文件/解析失败返回 null */
-	async readLocalZipRevision(): Promise<string | null> {
+	private async readLocalZipRevision(zipName: string): Promise<string | null> {
 		if (!this.app || !this.pluginDir) {
 			return null;
 		}
 		const adapter = this.app.vault.adapter;
-		const zipPath = this.jitendexZipPath();
+		const zipPath = this.dictZipPath(zipName);
 		if (!zipPath) {
 			return null;
 		}
@@ -557,10 +642,97 @@ export class DictionaryManager {
 		}
 	}
 
-	private async processZipFiles(files: Record<string, Uint8Array>): Promise<void> {
-		if (!this.db) {
-			return;
+	/**
+	 * 一键安装/更新所有词典（Jitendex + JMnedict）：
+	 * - 并行下载需更新的源（各到各 zip 路径，互不干扰，省一半下载等待）
+	 * - 串行导入（await importFromZipBufferInto 逐本——避免 IndexedDB 写入并发冲突 + stage 文案清晰）
+	 * - 各源独立 clearDb（整库 clear = per-dict clear，不影响另一本）
+	 * 返回 { updatedCount }：实际更新/安装了几本。已是最新未变更的不计。
+	 */
+	async updateDictionaries(onProgress?: DictProgressCb): Promise<{ updatedCount: number }> {
+		// 1. 收集各源状态
+		const info = await this.getSourceInfo();
+		const sources: UpdateSource[] = [
+			{
+				name: "Jitendex",
+				zipName: JITENDEX_ZIP_NAME,
+				downloadUrl: JITENDEX_DOWNLOAD_URL,
+				db: this.db,
+				latestRevision: info.sources[0].latestRevision,
+				installedRevision: info.sources[0].installedRevision,
+				installed: info.sources[0].installed,
+			},
+			{
+				name: "JMnedict",
+				zipName: JMNEDICT_ZIP_NAME,
+				downloadUrl: JMNEDICT_DOWNLOAD_URL,
+				db: this.dbNames,
+				latestRevision: info.sources[1].latestRevision,
+				installedRevision: info.sources[1].installedRevision,
+				installed: info.sources[1].installed,
+			},
+		];
+
+		// 2. 决定各源是否需下载 + zip 路径（复用本地 zip 或下载）
+		//    需更新的源：已导入==latest 且已导入 → 跳过；否则需获取 zip
+		type DownloadTask = { source: UpdateSource; zipPath: string | null; needDownload: boolean };
+		const tasks: DownloadTask[] = [];
+		for (const source of sources) {
+			onProgress?.(source.name, "fetching");
+			// 已导入且与最新一致 → 跳过该源
+			if (source.installed && source.latestRevision && source.latestRevision === source.installedRevision) {
+				tasks.push({ source, zipPath: null, needDownload: false });
+				continue;
+			}
+			const localRev = await this.readLocalZipRevision(source.zipName);
+			let zipPath = this.dictZipPath(source.zipName);
+			let needDownload = true;
+			if (source.latestRevision && localRev && localRev === source.latestRevision) {
+				// 本地 zip 版本与最新一致，复用，跳过下载
+				needDownload = false;
+			} else if (!source.latestRevision && localRev) {
+				// API 失败无法判断最新版，复用本地 zip 前校验：不比已导入的低才装
+				if (source.installed && source.installedRevision && compareRevisions(localRev, source.installedRevision) <= 0) {
+					// 本地不比已导入新，跳过
+					tasks.push({ source, zipPath: null, needDownload: false });
+					continue;
+				}
+				needDownload = false;
+			}
+			tasks.push({ source, zipPath, needDownload });
 		}
+
+		// 3. 并行下载需下载的源（各到各 zip 路径）
+		const downloadTasks = tasks.filter((t) => t.needDownload);
+		if (downloadTasks.length > 0) {
+			for (const t of downloadTasks) {
+				onProgress?.(t.source.name, "downloading");
+			}
+			await Promise.all(
+				downloadTasks.map(async (t) => {
+					const p = await this.downloadDictZip(t.source.downloadUrl, t.source.zipName);
+					t.zipPath = p;
+				}),
+			);
+		}
+
+		// 4. 串行导入需更新的源（clearDb 该库 + importFromZipBufferInto）
+		let updatedCount = 0;
+		for (const t of tasks) {
+			if (!t.zipPath) {
+				continue;
+			}
+			onProgress?.(t.source.name, "installing");
+			const buf = await this.app!.vault.adapter.readBinary(t.zipPath);
+			await this.clearDb(t.source.db);
+			await this.importFromZipBufferInto(t.source.db, buf);
+			onProgress?.(t.source.name, "done");
+			updatedCount++;
+		}
+		return { updatedCount };
+	}
+
+	private async processZipFiles(db: IDBPDatabase<YomitanDB>, files: Record<string, Uint8Array>): Promise<void> {
 		new Notice("正在导入词典…", 3000);
 
 		// 1. index.json
@@ -577,7 +749,7 @@ export class DictionaryManager {
 		if (!meta || !meta.title) {
 			throw new Error("zip 缺少有效的 index.json");
 		}
-		await this.db.put("dictionaries", meta);
+		await db.put("dictionaries", meta);
 
 		// 2. term_bank_*.json
 		const termKeys = Object.keys(files)
@@ -588,7 +760,7 @@ export class DictionaryManager {
 			try {
 				const txt = new TextDecoder().decode(files[key]);
 				const rawTerms = JSON.parse(txt) as RawTermEntry[];
-				const tx = this.db.transaction("terms", "readwrite");
+				const tx = db.transaction("terms", "readwrite");
 				for (const entry of rawTerms) {
 					const rest = entry.slice(5);
 					// Jitendex 把整个 glossary 包进单个数组元素（rest[0] 是数组），
@@ -623,7 +795,7 @@ export class DictionaryManager {
 			try {
 				const txt = new TextDecoder().decode(files[key]);
 				const rawTags = JSON.parse(txt) as RawTagEntry[];
-				const tx = this.db.transaction("tag_defs", "readwrite");
+				const tx = db.transaction("tag_defs", "readwrite");
 				for (const t of rawTags) {
 					const tag: ProcessedTag = {
 						name: t[0],
@@ -642,23 +814,7 @@ export class DictionaryManager {
 			}
 		}
 
-		await this.loadTags();
 		new Notice(`词典导入完成: ${totalTerms} 条`, 5000);
-	}
-
-	private async loadTags(): Promise<void> {
-		if (!this.db) {
-			return;
-		}
-		this.tagCache.clear();
-		const tags = await this.db.getAll("tag_defs");
-		for (const t of tags) {
-			this.tagCache.set(t.name, t);
-		}
-	}
-
-	getTag(name: string): ProcessedTag | undefined {
-		return this.tagCache.get(name);
 	}
 
 	private isValidDeinflection(
@@ -675,21 +831,21 @@ export class DictionaryManager {
 		return (deinflectRules & termFlags) !== 0;
 	}
 
-	async lookup(text: string): Promise<LookupResult[]> {
-		if (!this.db) {
+	/** 查单个库的 terms（expression/reading 索引 + deinflect + signature 去重） */
+	private async lookupInDb(db: IDBPDatabase<YomitanDB> | null, text: string): Promise<LookupResult[]> {
+		if (!db) {
 			return [];
 		}
 		const candidates = this.deinflector.deinflect(text);
-		const uniqueResults = new Map<string, LookupResult>();
-
+		const rawResults: LookupResult[] = [];
 		for (const candidate of candidates) {
 			const term = candidate.term;
-			const expressionMatches = await this.db.getAllFromIndex(
+			const expressionMatches = await db.getAllFromIndex(
 				"terms",
 				"expression",
 				term
 			);
-			const readingMatches = await this.db.getAllFromIndex(
+			const readingMatches = await db.getAllFromIndex(
 				"terms",
 				"reading",
 				term
@@ -699,16 +855,29 @@ export class DictionaryManager {
 				if (!this.isValidDeinflection(candidate.rules, match.rules)) {
 					continue;
 				}
-				const signature = `${match.expression}-${match.reading}-${JSON.stringify(
-					match.glossary
-				)}`;
-				if (!uniqueResults.has(signature)) {
-					uniqueResults.set(signature, {
-						...match,
-						deinflectionReasons:
-							candidate.reasons.length > 0 ? candidate.reasons : undefined,
-					});
-				}
+				rawResults.push({
+					...match,
+					deinflectionReasons:
+						candidate.reasons.length > 0 ? candidate.reasons : undefined,
+				});
+			}
+		}
+		return rawResults;
+	}
+
+	async lookup(text: string): Promise<LookupResult[]> {
+		// 查两个库（Jitendex + JMnedict）的并集，合并去重 + 按 score 排序
+		const [r1, r2] = await Promise.all([
+			this.lookupInDb(this.db, text),
+			this.lookupInDb(this.dbNames, text),
+		]);
+		const uniqueResults = new Map<string, LookupResult>();
+		for (const match of [...r1, ...r2]) {
+			const signature = `${match.expression}-${match.reading}-${JSON.stringify(
+				match.glossary
+			)}`;
+			if (!uniqueResults.has(signature)) {
+				uniqueResults.set(signature, match);
 			}
 		}
 		return Array.from(uniqueResults.values()).sort((a, b) => b.score - a.score);

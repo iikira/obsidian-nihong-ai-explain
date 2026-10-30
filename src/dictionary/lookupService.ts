@@ -53,7 +53,6 @@ export class LookupService {
 			}
 			if (!this.popup) {
 				this.popup = new DictionaryPopup(
-					(name) => manager.getTag(name),
 					(query) => void this.lookupInPopup(query),
 					() => this.opts.getDictFontSize(),
 					(expression, reading) => manager.getAccents(expression, reading),
