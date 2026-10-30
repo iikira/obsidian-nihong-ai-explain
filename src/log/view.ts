@@ -132,13 +132,12 @@ export class LogPanelView extends ItemView {
 		this.ttsListEl = ttsPanel.createDiv({ cls: "nihong-ai-log-list" });
 		this.panels.tts = ttsPanel;
 
-		// 订阅缓存变更：当前在对应 tab 时自动重渲染（翻译/朗读后、设置页清空缓存后触发）
-		this.unsubscribeCache = subscribeCacheChange((kind) => {
-			if (kind === "translate" && this.activeTab === "translate") {
-				this.renderTranslateCache();
-			} else if (kind === "tts" && this.activeTab === "tts") {
-				this.renderTTSCache();
-			}
+		// 订阅缓存变更：任一缓存变更都刷新两个缓存 tab（朗读/翻译后、设置页清空缓存后），
+		// 这样在朗读缓存 tab 时翻译出新结果，朗读缓存行也能实时显示译文；反之亦然。
+		// 非可见 tab 的 DOM 已存在（只是 display:none），刷新它不影响可见 tab。
+		this.unsubscribeCache = subscribeCacheChange(() => {
+			this.renderTranslateCache();
+			this.renderTTSCache();
 		});
 
 		// 默认激活日志 tab
