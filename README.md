@@ -25,19 +25,22 @@
 | 单词解析输出目录 | （空） | 单词解析保存到此目录 |
 | 语法拆解输出目录 | （空） | 语法拆解笔记保存到此目录 |
 | 大模型分组 | （空） | 可配置多组 OpenAI 兼容 API 地址 / 模型 id / API Key |
-| 朗读引擎 | `google` | `google`/ `edge` / `windows`（仅 Windows 系统可用，需安装日文语音包） |
+| 朗读引擎 | `google` | `google`/ `windows`（仅 Windows 系统可用，需安装日文语音包） |
 
 配置完成后，在 [Lexis](https://community.obsidian.md/plugins/lexis) 插件的设置页面的 `词典与词库来源` 章节，也分别对应的配置上 `单词解析输出目录` 和 `语法拆解输出目录`。
 
 ### 离线词典
 
-设置页「离线词典」区块：
+设置页「离线词典」区块，一个按钮安装/更新两本词典：
 
-首次使用时，需要先点击「安装词典」（从 Jitendex 官方源下载 `jitendex-yomitan.zip` 并导入 IndexedDB）。
+- **Jitendex**：日语通用词典（释义、例句、词性）。
+- **JMnedict**：日语专有名词词典（人名、地名、公司名等 66 万余条）。
 
-Jitendex 词典源：<https://jitendex.org/pages/downloads.html>。
+两本独立存储，更新一本不影响另一本。查词典时两本同时检索，相同释义去重，人名/地名等来自 JMnedict。专有名词分类标签已中文化，Jitendex 词性标签可在「词典使用方法」入口查看中文解释。
 
-声调数据来自 kanjium `accents.txt` <https://github.com/mifunetoshiro/kanjium/blob/master/data/source_files/raw/accents.txt>。
+词典源：[Jitendex](https://jitendex.org/pages/downloads.html)、[JMnedict](https://github.com/yomidevs/jmdict-yomitan)。
+
+声调数据来自 kanjium [accents.txt](https://github.com/mifunetoshiro/kanjium/blob/master/data/source_files/raw/accents.txt)。
 
 ## 使用
 
