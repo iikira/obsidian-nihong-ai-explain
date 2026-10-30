@@ -53,7 +53,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 			engine: this.settings.ttsEngine,
 			voice: this.settings.ttsEngine === "windows"
 				? this.settings.ttsWindowsVoice
-				: this.settings.ttsEdgeVoice,
+				: "",
 			rate: this.settings.ttsRate,
 			googleDomain: this.settings.ttsGoogleDomain,
 		});

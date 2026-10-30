@@ -21,21 +21,17 @@ if (testFiles.length === 0) {
 // 桩：obsidian / electron 在 Node 测试环境不存在，置空模块避免 require 失败。
 // 待测函数都是纯函数，不实际调用 Obsidian API；若误用会在测试中抛错（被测试捕获）。
 //
-// 另：tts/index.ts 经 windows.ts 引入 onecoreTtsB64.ts（构建时生成、gitignore 不提交），
-// 且 tts/index.ts 引入 edge-tts-universal（npm 包）。干净 checkout 下跑 test 不会先生成
-// onecoreTtsB64.ts，直接 bundle 会失败。故对以下模块也置桩：
+// 另：tts/index.ts 经 windows.ts 引入 onecoreTtsB64.ts（构建时生成、gitignore 不提交）。
+// 干净 checkout 下跑 test 不会先生成 onecoreTtsB64.ts，直接 bundle 会失败。故对以下模块也置桩：
 //   - onecoreTtsB64（构建产物，可能不存在）
 //   - src/tts/windows（依赖 window.require/child_process，测试环境无意义）
-//   - edge-tts-universal（会真实触网，测试要离线）
 // 用 path 正则匹配 onResolve（esbuild 解析后的路径），重定向到 stub-stub 命名空间。
 const stubModules = [
 	// filter 匹配 esbuild onResolve 的 path：
 	//   - 相对说明符（./windows、./onecore/onecoreTtsB64）此时尚未加扩展名
-	//   - 包名说明符（edge-tts-universal）原样传入
 	// esbuild 在插件 onResolve 返回 path 后才解析，故 args.path 是说明符原样。
 	{ filter: /(^|\/)windows$/, contents: "module.exports = { synthesizeWindows: async () => new ArrayBuffer(0), isWindowsTTSAvailable: () => false, listWindowsVoices: async () => [], probeWindowsTTSOnce: async () => false };" },
 	{ filter: /(^|\/)onecoreTtsB64$/, contents: "module.exports = { ONECORE_TTS_B64: '' };" },
-	{ filter: /^edge-tts-universal$/, contents: "module.exports = { default: { Synthesis: function() {} }, Synthesis: function() {} };" },
 ];
 
 const stubPlugin = {

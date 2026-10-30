@@ -43,10 +43,8 @@ export interface NihongAIExplainSettings {
 	dictFontSize: number;
 	/** TTS 朗读语速（0.5–3.0，1.0=正常） */
 	ttsRate: number;
-	/** TTS 引擎：google / edge / windows */
+	/** TTS 引擎：google / windows */
 	ttsEngine: TtsEngine;
-	/** edge 引擎语音短名（如 ja-JP-NanamiNeural） */
-	ttsEdgeVoice: string;
 	/** windows 引擎语音 DisplayName（OneCore 自然语音，如 Microsoft Ayumi） */
 	ttsWindowsVoice: string;
 	/** google 引擎自定义域名（如 google-translate-vercel.roojay.com），空=官方域名 */
@@ -80,7 +78,6 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	dictFontSize: 0,
 	ttsRate: 1.0,
 	ttsEngine: "google",
-	ttsEdgeVoice: "ja-JP-NanamiNeural",
 	ttsWindowsVoice: "",
 	ttsGoogleDomain: "",
 	disableLexisPill: false,

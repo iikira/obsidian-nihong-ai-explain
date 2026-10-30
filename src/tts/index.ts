@@ -2,7 +2,6 @@ import { Notice, requestUrl } from "obsidian";
 import { logInfo, logError, errMsg } from "../log";
 import { emitCacheChange } from "../cacheEvents";
 import { PersistentTTSCache, IndexedDBTTSCacheStorage, type TTSCacheStorage } from "./cache";
-import { synthesizeEdge, formatEdgeRate } from "./edge";
 import {
 	synthesizeWindows,
 	isWindowsTTSAvailable,
@@ -26,12 +25,12 @@ const TTS_HEADERS = {
 };
 
 /** TTS 引擎类型 */
-export type TtsEngine = "google" | "edge" | "windows";
+export type TtsEngine = "google" | "windows";
 
-/** TTS 配置：引擎、语音（edge/windows 用）、语速（1.0=正常） */
+/** TTS 配置：引擎、语音（windows 用）、语速（1.0=正常） */
 export interface TtsConfig {
 	engine: TtsEngine;
-	/** edge 引擎的语音短名 / windows 引擎的语音描述；google 忽略 */
+	/** windows 引擎的语音描述；google 忽略 */
 	voice: string;
 	/** 朗读语速倍率（0.5–3.0，1.0=正常） */
 	rate: number;
@@ -95,7 +94,7 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((r) => window.setTimeout(r, ms));
 }
 
-/** 缓存 key 加引擎 + 语音前缀，防止 google / edge / 不同语音同文本缓存串 */
+/** 缓存 key 加引擎 + 语音前缀，防止 google / windows 不同语音同文本缓存串 */
 function cacheKey(text: string): string {
 	return `${currentConfig.engine}::${currentConfig.voice}::${text}`;
 }
@@ -158,7 +157,7 @@ export interface TTSCacheEntry {
 	text: string;
 	/** 引擎 */
 	engine: string;
-	/** 语音（edge/windows 用，google 为空） */
+	/** 语音（windows 用，google 为空） */
 	voice: string;
 	/** blob URL（点击直接播） */
 	blobUrl: string;
@@ -236,13 +235,7 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	}
 	const engine = currentConfig.engine;
 	let buf: ArrayBuffer;
-	if (engine === "edge") {
-		buf = await synthesizeEdge(
-			text,
-			currentConfig.voice,
-			formatEdgeRate(currentConfig.rate),
-		);
-	} else if (engine === "windows") {
+	if (engine === "windows") {
 		buf = await synthesizeWindows(text, currentConfig.rate, currentConfig.voice);
 	} else {
 		const url = buildTTSURL(text);
@@ -335,7 +328,7 @@ export async function speakText(text: string): Promise<void> {
 
 		const audio = new Audio(blobUrl);
 		audio.setCssStyles({ display: "none" });
-		// 语速处理：google 用 playbackRate；edge/windows 已在合成端设了 rate，这里不再叠加避免双重变速
+		// 语速处理：google 用 playbackRate；windows 已在合成端设了 rate，这里不再叠加避免双重变速
 		audio.playbackRate = currentConfig.engine === "google" ? currentConfig.rate : 1.0;
 		currentAudio = audio;
 

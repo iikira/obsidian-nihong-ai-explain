@@ -279,8 +279,6 @@ function engineLabel(engine: string): string {
 	switch (engine) {
 		case "google":
 			return "Google";
-		case "edge":
-			return "Edge";
 		case "windows":
 			return "Windows";
 		default:
