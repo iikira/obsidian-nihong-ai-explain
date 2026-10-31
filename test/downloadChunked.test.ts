@@ -77,6 +77,12 @@ function makeMemoryAdapter(): { adapter: ChunkFileAdapter; written: () => Uint8A
 		async remove(_path: string): Promise<void> {
 			bytes.length = 0;
 		},
+		async exists(_path: string): Promise<boolean> {
+			return bytes.length > 0;
+		},
+		async readBinary(_path: string): Promise<ArrayBuffer> {
+			return written().buffer.slice(0) as ArrayBuffer;
+		},
 	};
 	const written = (): Uint8Array => {
 		const total = bytes.reduce((s, b) => s + b.length, 0);

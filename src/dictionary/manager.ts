@@ -15,7 +15,7 @@ import type {
 	RawTermEntry,
 } from "./types";
 
-interface YomitanDB extends DBSchema {
+export interface YomitanDB extends DBSchema {
 	terms: {
 		key: number;
 		value: ProcessedTerm;
@@ -69,11 +69,14 @@ export type ChunkRequestFn = (params: {
 	throw?: boolean;
 }) => Promise<{ status: number; arrayBuffer: ArrayBuffer; headers: Record<string, string> }>;
 
-/** 分片下载的文件适配器（与 Obsidian DataAdapter 的写入/删除方法子集一致，可注入 mock） */
+/** 文件适配器（与 Obsidian DataAdapter 的方法子集一致，可注入 mock）：
+ *  分片下载用 writeBinary/appendBinary/remove；读本地 zip 版本 + 读下载的 zip 用 exists/readBinary。 */
 export interface ChunkFileAdapter {
 	writeBinary(path: string, data: ArrayBuffer): Promise<void>;
 	appendBinary(path: string, data: ArrayBuffer): Promise<void>;
 	remove(path: string): Promise<void>;
+	exists(path: string): Promise<boolean>;
+	readBinary(path: string): Promise<ArrayBuffer>;
 }
 
 /** 分片下载选项 */
@@ -232,6 +235,10 @@ export class DictionaryManager {
 	private app: App | null = null;
 	private pluginDir: string | null = null;
 	private accentDb: AccentDb = new AccentDb();
+	/** 网络请求函数（默认 obsidian requestUrl；测试可注入 mock，便于测 fetch 及 updateDictionaries） */
+	private requestFn: typeof requestUrl = requestUrl;
+	/** 文件适配器（默认 this.app.vault.adapter；测试可注入内存版，便于测 updateDictionaries/readLocalZipRevision） */
+	private fileAdapter: ChunkFileAdapter | null = null;
 	/** fetchLatestRevision 的会话内缓存值（null=未知或拉取失败）；命中缓存时不打 GitHub API */
 	private latestRevisionCache: string | null = null;
 	/** latestRevisionCache 的过期时间戳（ms）；过期后重新拉取。拉取失败则缩短缓存时间 */
@@ -254,6 +261,27 @@ export class DictionaryManager {
 
 	setPluginDir(dir: string): void {
 		this.pluginDir = dir;
+	}
+
+	/** 注入网络请求函数（测试用，默认 obsidian requestUrl） */
+	setRequestFn(fn: typeof requestUrl): void {
+		this.requestFn = fn;
+	}
+
+	/** 注入文件适配器（测试用，默认 this.app.vault.adapter） */
+	setFileAdapter(adapter: ChunkFileAdapter | null): void {
+		this.fileAdapter = adapter;
+	}
+
+	/** 取当前文件适配器（优先用注入的，否则用 app.vault.adapter） */
+	private getAdapter(): ChunkFileAdapter | null {
+		if (this.fileAdapter) {
+			return this.fileAdapter;
+		}
+		if (this.app) {
+			return this.app.vault.adapter;
+		}
+		return null;
 	}
 
 	async init(): Promise<void> {
@@ -367,59 +395,18 @@ export class DictionaryManager {
 		await this.clearDb(this.dbNames);
 	}
 
-	/** 从插件目录扫描 zip 文件并导入（用户需先把 zip 复制到插件目录） */
-	async importFromPluginDir(): Promise<void> {
-		if (!this.db) {
-			throw new Error("IndexedDB 未初始化");
-		}
-		if (!this.app) {
-			throw new Error("App 未注入");
-		}
-		if (!this.pluginDir) {
-			throw new Error("插件目录未配置");
-		}
-		const adapter = this.app.vault.adapter;
-		const dir = normalizePath(this.pluginDir);
-		// 列出插件目录下所有文件
-		let listed: { files: string[]; folders: string[] };
-		try {
-			listed = await adapter.list(dir);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			throw new Error(`扫描插件目录失败: ${msg}`);
-		}
-		// adapter.list 返回的 files 已是完整 vault 相对路径（含目录前缀），直接用
-		const zips = listed.files.filter((name) =>
-			name.toLowerCase().endsWith(".zip"),
-		);
-		if (zips.length === 0) {
-			throw new Error(
-				`插件目录下未找到 zip 文件，请先将词典 zip 复制到: ${dir}`,
-			);
-		}
-		if (zips.length > 1) {
-			throw new Error(
-				`插件目录下存在多个 zip 文件，请只保留一个: ${zips.join(", ")}`,
-			);
-		}
-		const zipPath = zips[0];
-		let buf: ArrayBuffer;
-		try {
-			buf = await adapter.readBinary(zipPath);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			throw new Error(`读取 zip 失败: ${msg}`);
-		}
-		await this.importFromZipBuffer(buf);
-	}
-
 	/** 解压 zip 字节并导入 Jitendex 库（供「从插件目录导入」与「下载导入」共用） */
 	async importFromZipBuffer(buf: ArrayBuffer): Promise<void> {
 		await this.importFromZipBufferInto(this.db, buf);
 	}
 
-	/** 解压 zip 字节并导入指定库（库无关，Jitendex/JMnedict 库共用） */
-	private async importFromZipBufferInto(db: IDBPDatabase<YomitanDB> | null, buf: ArrayBuffer): Promise<void> {
+	/** 解压 zip 字节并导入 JMnedict 人名库（与 importFromZipBuffer 对称，导入 dbNames） */
+	async importNamesFromZipBuffer(buf: ArrayBuffer): Promise<void> {
+		await this.importFromZipBufferInto(this.dbNames, buf);
+	}
+
+	/** 解压 zip 字节并导入指定库（库无关，Jitendex/JMnedict 库共用；public 供测试 + 通用导入） */
+	async importFromZipBufferInto(db: IDBPDatabase<YomitanDB> | null, buf: ArrayBuffer): Promise<void> {
 		if (!db) {
 			return;
 		}
@@ -457,15 +444,15 @@ export class DictionaryManager {
 	 */
 	/** 下载指定词典 zip 到插件目录（覆盖旧 zip），返回 zip 路径。库无关，按 url + zipName 下载 */
 	private async downloadDictZip(url: string, zipName: string): Promise<string> {
-		if (!this.app || !this.pluginDir) {
+		const adapter = this.getAdapter();
+		if (!adapter || !this.pluginDir) {
 			throw new Error("插件目录未配置，无法保存下载文件");
 		}
-		const adapter = this.app.vault.adapter;
 		const zipPath = this.dictZipPath(zipName);
 		if (!zipPath) {
 			throw new Error("插件目录未配置");
 		}
-		await downloadChunked(requestUrl, adapter, url, zipPath, {
+		await downloadChunked(this.requestFn, adapter, url, zipPath, {
 			chunkSize: DictionaryManager.CHUNK_SIZE,
 			maxRetries: DictionaryManager.CHUNK_MAX_RETRIES,
 			retryInterval: DictionaryManager.CHUNK_RETRY_INTERVAL,
@@ -484,7 +471,7 @@ export class DictionaryManager {
 			return this.latestRevisionCache;
 		}
 		try {
-			const resp = await requestUrl({
+			const resp = await this.requestFn({
 				url: JITENDEX_RELEASES_API,
 				method: "GET",
 				headers: { Accept: "application/vnd.github+json" },
@@ -539,7 +526,7 @@ export class DictionaryManager {
 			return this.jmnedictLatestCache;
 		}
 		try {
-			const resp = await requestUrl({
+			const resp = await this.requestFn({
 				url: JMNEDICT_INDEX_URL,
 				method: "GET",
 				throw: false,
@@ -612,10 +599,10 @@ export class DictionaryManager {
 	 * 库无关，按 zipName 定位本地 zip。
 	 */
 	private async readLocalZipRevision(zipName: string): Promise<string | null> {
-		if (!this.app || !this.pluginDir) {
+		const adapter = this.getAdapter();
+		if (!adapter || !this.pluginDir) {
 			return null;
 		}
-		const adapter = this.app.vault.adapter;
 		const zipPath = this.dictZipPath(zipName);
 		if (!zipPath) {
 			return null;
@@ -723,7 +710,11 @@ export class DictionaryManager {
 				continue;
 			}
 			onProgress?.(t.source.name, "installing");
-			const buf = await this.app!.vault.adapter.readBinary(t.zipPath);
+			const adapter = this.getAdapter();
+			if (!adapter) {
+				throw new Error("文件适配器未配置，无法读取下载的 zip");
+			}
+			const buf = await adapter.readBinary(t.zipPath);
 			await this.clearDb(t.source.db);
 			await this.importFromZipBufferInto(t.source.db, buf);
 			onProgress?.(t.source.name, "done");
@@ -732,10 +723,13 @@ export class DictionaryManager {
 		return { updatedCount };
 	}
 
-	private async processZipFiles(db: IDBPDatabase<YomitanDB>, files: Record<string, Uint8Array>): Promise<void> {
+	async processZipFiles(db: IDBPDatabase<YomitanDB>, files: Record<string, Uint8Array>): Promise<void> {
 		new Notice("正在导入词典…", 3000);
 
-		// 1. index.json
+		// 1. index.json（仅解析，暂不写入 dictionaries store）
+		//    重要：版本号（meta.revision）必须等所有词条 + tag 都导入成功后才写入，
+		//    防止导入中途程序退出后，dictionaries 已记新版本号但词条不完整，
+		//    再次打开时被getSourceInfo 误判为「已是最新」而不再补导。
 		let meta: DictionaryMeta | null = null;
 		const indexKey = Object.keys(files).find((k) => k.endsWith("index.json"));
 		if (indexKey) {
@@ -749,13 +743,13 @@ export class DictionaryManager {
 		if (!meta || !meta.title) {
 			throw new Error("zip 缺少有效的 index.json");
 		}
-		await db.put("dictionaries", meta);
 
-		// 2. term_bank_*.json
+		// 2. term_bank_*.json（先导入所有词条）
 		const termKeys = Object.keys(files)
 			.filter((k) => k.includes("term_bank_") && k.endsWith(".json"))
 			.sort();
 		let totalTerms = 0;
+		let termParseFailed = false;
 		for (const key of termKeys) {
 			try {
 				const txt = new TextDecoder().decode(files[key]);
@@ -783,6 +777,7 @@ export class DictionaryManager {
 				}
 				await tx.done;
 			} catch (e) {
+				termParseFailed = true;
 				logWarn("dict", `解析 ${key} 失败: ${errMsg(e)}`);
 			}
 		}
@@ -813,6 +808,19 @@ export class DictionaryManager {
 				logWarn("dict", `解析 ${key} 失败: ${errMsg(e)}`);
 			}
 		}
+
+		// 4. 最后才写入 dictionaries（含版本号 revision）——仅当词条全部导入成功时。
+		//    保证「dictionaries 有版本号 ⟺ 词条完整」：
+		//    - 导入中途程序退出：dictionaries 无新版本号 → 再开判为未安装/需更新，触发重导。
+		//    - term_bank 解析失败（损坏 JSON 等）：不写版本号 + 抛错，调用方 updateDictionaries
+		//      不计为成功，再开判为需更新，触发重导，不会误判为「已是最新」。
+		//    修复前：先写版本号再导词条，中途退出/解析失败后版本号已写入，再开误判为已最新、词条残缺。
+		if (termParseFailed || totalTerms === 0) {
+			throw new Error(
+				`词典词条导入失败（解析失败=${termParseFailed}，词条数=${totalTerms}），不写入版本号`,
+			);
+		}
+		await db.put("dictionaries", meta);
 
 		new Notice(`词典导入完成: ${totalTerms} 条`, 5000);
 	}

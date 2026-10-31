@@ -4,7 +4,7 @@ import {
 	requestUrl,
 	type App,
 } from "obsidian";
-import { logWarn } from "../log";
+import { logInfo, logWarn } from "../log";
 
 /** 模型列表缓存项：按 apiUrl+apiKey 维度缓存，避免每次输入都请求端点 */
 interface ModelListCacheItem {
@@ -89,20 +89,22 @@ export async function fetchModelIds(
 	if (apiKey) {
 		headers["Authorization"] = `Bearer ${apiKey}`;
 	}
+	const t0 = Date.now();
 	try {
 		const resp = await fetcher({ url, method: "GET", headers, throw: false });
 		if (resp.status < 200 || resp.status >= 300) {
-			logWarn("settings", `拉取模型列表 HTTP ${resp.status}: ${url}`);
+			logWarn("settings", `拉取模型列表失败: HTTP ${resp.status}，耗时=${Date.now() - t0}ms`);
 			return [];
 		}
 		const data = resp.json.data ?? [];
 		const ids = data.map((m) => m.id).filter((x): x is string => !!x);
 		// 仅成功才缓存，60 秒后过期
 		modelListCache = { key, ids, expiresAt: Date.now() + MODEL_LIST_CACHE_TTL };
+		logInfo("settings", `拉取模型列表成功: ${ids.length} 个模型，耗时=${Date.now() - t0}ms`);
 		return ids;
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
-		logWarn("settings", `拉取模型列表失败: ${msg}`);
+		logWarn("settings", `拉取模型列表失败: ${msg}，耗时=${Date.now() - t0}ms`);
 		return [];
 	}
 }
@@ -125,6 +127,12 @@ export function __clearModelListCacheForTest(): void {
 export class ModelSuggest extends AbstractInputSuggest<string> {
 	/** 本实例的模型列表（从全局缓存命中或网络拉取） */
 	private ids: string[] = [];
+	/** 当前分组的 apiUrl（refresh 用，构造时不拉取，首次聚焦时才按此拉取） */
+	private apiUrl: string;
+	/** 当前分组的 apiKey */
+	private apiKey: string;
+	/** 是否已按当前 apiUrl+apiKey 拉取过（避免重复拉取；refresh 时重置） */
+	private fetched = false;
 
 	constructor(
 		app: App,
@@ -135,20 +143,42 @@ export class ModelSuggest extends AbstractInputSuggest<string> {
 	) {
 		super(app, inputEl);
 		this.limit = 50;
-		// 构造时按当前分组的 apiUrl+apiKey 取列表填实例：全局缓存命中则立即就绪，
-		// 未命中则异步拉取，完成后回填实例（输入时尚未返回则下拉为空，不影响手动输入）。
-		this.refresh(apiUrl, apiKey);
+		this.apiUrl = apiUrl;
+		this.apiKey = apiKey;
+		// 惰性拉取：构造时不发请求。仅当用户聚焦模型 id 输入框时才拉取（首次聚焦触发一次）。
+		// 这样首次打开设置 tab / 启动 Obsidian 恢复设置 tab 时不会预拉模型列表。
+		inputEl.addEventListener("focus", () => {
+			this.ensureLoaded();
+		});
+	}
+
+	/** 首次使用时拉取一次（聚焦触发）；已拉取则 noop。全局缓存命中则零请求。 */
+	private ensureLoaded(): void {
+		if (this.fetched) {
+			return;
+		}
+		this.fetched = true;
+		void fetchModelIds(this.apiUrl, this.apiKey).then((list) => {
+			this.ids = list;
+		});
 	}
 
 	/**
 	 * 按最新 apiUrl+apiKey 重新取模型列表回填实例：全局缓存按 apiUrl+apikey 作 key
 	 * 天然隔离（换端点/换 key 不命中，自动重新拉取；同 key 未过期直接命中）。
 	 * 用户编辑 API 地址 / API Key 后调用，让下拉候选跟上端点变化（建议去抖后调用，
-	 * 避免输入中间态逐字符触发请求）。拉取完成前的旧列表仅作过渡展示。
+	 * 避免输入中间态逐字符触发请求）。调用后重置 fetched 标志，下次聚焦重新拉取。
 	 */
 	refresh(apiUrl: string, apiKey: string): void {
+		this.apiUrl = apiUrl;
+		this.apiKey = apiKey;
+		this.fetched = false;
+		this.ids = [];
+		// 端点变了立即拉取一份填实例（用户改完端点后，下拉候选应跟上）；
+		// 全局缓存命中则零请求，未命中才发网络请求。
 		void fetchModelIds(apiUrl, apiKey).then((list) => {
 			this.ids = list;
+			this.fetched = true;
 		});
 	}
 

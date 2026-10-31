@@ -30,6 +30,7 @@
 		"esbuild": "^0.20.2",
 		"eslint": "^10.13.0",
 		"eslint-plugin-obsidianmd": "^0.4.2",
+		"fake-indexeddb": "^6.2.7",
 		"obsidian": "^1.5.7",
 		"sass": "^1.107.0",
 		"typescript": "^5.4.0"

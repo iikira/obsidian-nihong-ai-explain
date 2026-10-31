@@ -44,7 +44,7 @@ const stubPlugin = {
 		build.onLoad({ filter: /.*/, namespace: "stub-obsidian" }, () => ({
 			// 导出最小桩：speakText/各模块用到的 Notice（类）、requestUrl 等；
 			// 测试不应真实触网，requestUrl 在测试中通过缓存命中绕开
-			contents: "module.exports = { Notice: function Notice() {}, requestUrl: async () => ({ status: 200, json: { data: [] }, arrayBuffer: new ArrayBuffer(0) }) };",
+			contents: "module.exports = { Notice: function Notice() {}, requestUrl: async () => ({ status: 200, json: { data: [] }, arrayBuffer: new ArrayBuffer(0) }), normalizePath: (p) => p };",
 			loader: "js",
 		}));
 		build.onResolve({ filter: /^electron$/ }, (args) => ({
