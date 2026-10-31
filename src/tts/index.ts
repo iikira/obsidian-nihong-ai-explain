@@ -11,6 +11,22 @@ import {
 
 export { isWindowsTTSAvailable, listWindowsVoices, probeWindowsTTSOnce };
 
+/**
+ * google TTS 的请求函数：生产用 obsidian requestUrl，测试可经 setRequestFnForTest 注入 mock
+ * （返非空无效字节以测「play 失败不写缓存」路径，obsidian 桩固定返空字节无法覆盖该路径）。
+ */
+type TTSRequestFn = (params: {
+	url: string;
+	method: string;
+	headers: Record<string, string>;
+}) => Promise<{ status: number; arrayBuffer: ArrayBuffer }>;
+let requestFn: TTSRequestFn = (params) => requestUrl(params);
+
+/** 仅测试用：注入 mock 请求函数，绕过 obsidian requestUrl 桩（桩固定返空字节）。生产代码不应调用。 */
+export function setRequestFnForTest(fn: TTSRequestFn): void {
+	requestFn = fn;
+}
+
 const MAX_SEGMENT_CHARS = 200;
 const SPLIT_PATTERNS = [
 	/([。！？!?.…])/,
@@ -238,10 +254,27 @@ export async function __seedTtsCacheForTest(text: string, buffer: ArrayBuffer): 
 	return setCache(text, buffer);
 }
 
-async function fetchTTSBlob(text: string): Promise<string> {
+/** fetchTTSBlob 取回的字节与临时播放 URL：buffer=null 表示命中缓存（URL 来自缓存，无需写） */
+interface FetchedBlob {
+	/** 供 Audio 播放的 URL：命中缓存时为缓存里的 blobUrl；未命中时为本次新建的临时 blobUrl */
+	url: string;
+	/** 原始音频字节：未命中时携带（成功播放后才写缓存）；命中缓存时为 null（缓存已有，无需重写） */
+	buffer: ArrayBuffer | null;
+}
+
+/**
+ * 取回一段 TTS 音频字节并建临时 blobUrl 供播放。
+ *
+ * **不在此写缓存**：以 audio.play() 的真实成败为准——play 成功（整段 ended）后才由 speakText
+ * 调 setCache 写缓存；play 失败或 error 事件则回收临时 blobUrl、不写，避免无效音频（google 偶发
+ * 返回 HTML 错误页/截断字节）污染缓存后被反复命中、永远不重新请求。
+ *
+ * 命中缓存：返回缓存里的 blobUrl，buffer=null（speakText 据此跳过写缓存与回收）。
+ */
+async function fetchTTSBlob(text: string): Promise<FetchedBlob> {
 	const cached = getCache(text);
 	if (cached !== null) {
-		return cached;
+		return { url: cached, buffer: null };
 	}
 	const engine = currentConfig.engine;
 	let buf: ArrayBuffer;
@@ -250,7 +283,7 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	} else {
 		const url = buildTTSURL(text);
 		const t0 = Date.now();
-		const resp = await requestUrl({
+		const resp = await requestFn({
 			url,
 			method: "GET",
 			headers: TTS_HEADERS,
@@ -264,10 +297,10 @@ async function fetchTTSBlob(text: string): Promise<string> {
 	if (!buf || buf.byteLength === 0) {
 		throw new Error(`${engine} TTS 响应体为空`);
 	}
-	// 存字节到持久层 + 建 blobUrl 到内存层，返回 blobUrl 供播放
+	// 建临时 blobUrl 供播放；写缓存推迟到 play 成功后由 speakText 调 setCache
 	const mime = engine === "windows" ? "audio/wav" : "audio/mpeg";
-	const blobUrl = await setCache(text, buf, mime);
-	return blobUrl;
+	const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+	return { url: blobUrl, buffer: buf };
 }
 
 export function isTTSAvailable(): boolean {
@@ -318,11 +351,14 @@ export async function speakText(text: string): Promise<void> {
 		}
 
 		let blobUrl: string;
+		let buffer: ArrayBuffer | null;
 		try {
-			blobUrl = await fetchTTSBlob(chunks[idx]);
+			const fetched = await fetchTTSBlob(chunks[idx]);
+			blobUrl = fetched.url;
+			buffer = fetched.buffer;
 		} catch (err) {
 			logError(
-				"nihong-ai-explain tts",
+				"tts",
 				`fetchTTSBlob 失败（第 ${idx + 1}/${chunks.length} 段）: ${errMsg(err)}`,
 			);
 			if (token !== currentToken || failed) {
@@ -334,6 +370,10 @@ export async function speakText(text: string): Promise<void> {
 			return;
 		}
 		if (token !== currentToken || failed) {
+			// 取回后已被打断：未命中缓存时回收临时 blobUrl，避免泄漏
+			if (buffer) {
+				URL.revokeObjectURL(blobUrl);
+			}
 			return;
 		}
 
@@ -355,6 +395,10 @@ export async function speakText(text: string): Promise<void> {
 			await audio.play();
 		} catch (err) {
 			logError("tts", `audio.play() 失败: ${errMsg(err)}`);
+			// play 失败 → 不写缓存；未命中缓存时回收临时 blobUrl
+			if (buffer) {
+				URL.revokeObjectURL(blobUrl);
+			}
 			if (token !== currentToken || failed) {
 				return;
 			}
@@ -391,14 +435,28 @@ export async function speakText(text: string): Promise<void> {
 			};
 			const onEnd = (): void => {
 				cleanup();
+				// 整段自然播完 = 音频可解码有效 → 此时才写缓存（buffer=null 表示命中缓存，无需重写）。
+				// setCache 内部会再建一个 blobUrl 存入缓存 Map，与正在播的临时 blobUrl 不同；
+				// 临时 blobUrl 此时已无需保留（audio 已 remove），由 setCache 写完后回收。
+				if (buffer) {
+					const mime =
+						currentConfig.engine === "windows" ? "audio/wav" : "audio/mpeg";
+					void setCache(chunks[idx], buffer, mime).then(() => {
+						URL.revokeObjectURL(blobUrl);
+					});
+				}
 				resolve();
 			};
 			const onError = (): void => {
 				logError(
-					"nihong-ai-explain tts",
+					"tts",
 					`audio error 事件 code=${audio.error?.code}`,
 				);
 				cleanup();
+				// 解码/播放失败 → 不写缓存；未命中缓存时回收临时 blobUrl
+				if (buffer) {
+					URL.revokeObjectURL(blobUrl);
+				}
 				if (token === currentToken && !failed) {
 					failed = true;
 					new Notice(

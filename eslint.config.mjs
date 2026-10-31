@@ -19,8 +19,8 @@ export default defineConfig([
 						"test/*.mjs",
 					],
 					// test/*.ts 与配置/构建脚本不在 tsconfig include 内，走 default project；
-					// 数量略超默认上限 8，放宽到 24（含 test/*.ts + eslint/esbuild 配置脚本，留余量）。
-					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 24,
+					// 数量略超默认上限 8，放宽到 32（含 test/*.ts + eslint/esbuild 配置脚本，留余量）。
+					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 32,
 				},
 			},
 		},
