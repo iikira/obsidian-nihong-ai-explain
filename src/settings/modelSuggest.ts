@@ -119,9 +119,8 @@ export function __clearModelListCacheForTest(): void {
  * 交互逻辑与 FolderSuggest 一致（addSearch + AbstractInputSuggest），数据源是按需拉取的模型列表。
  *
  * 缓存分层：全局缓存（fetchModelIds 的 60 秒 TTL）作同端点去重加速层；
- * 每个 ModelSuggest 实例**持有自己的模型列表**（从全局缓存命中或网络拉取），getSuggestions
- * 只读实例自有列表——这样切换分组/新增分组时旧实例随 DOM 销毁，新实例拿当前分组的列表，
- * 不会串到上一个分组的模型列表。
+ * 每个 ModelSuggest 实例**持有自己的模型列表**（getSuggestions 首次调用时从全局缓存命中或网络拉取），
+ * 这样切换分组/新增分组时旧实例随 DOM 销毁，新实例拿当前分组的列表，不会串到上一个分组的模型列表。
  * 点选后通过 onPick 回传模型 id，由调用方触发 onChange 保存。
  */
 export class ModelSuggest extends AbstractInputSuggest<string> {
@@ -145,44 +144,28 @@ export class ModelSuggest extends AbstractInputSuggest<string> {
 		this.limit = 50;
 		this.apiUrl = apiUrl;
 		this.apiKey = apiKey;
-		// 惰性拉取：构造时不发请求。仅当用户聚焦模型 id 输入框时才拉取（首次聚焦触发一次）。
-		// 这样首次打开设置 tab / 启动 Obsidian 恢复设置 tab 时不会预拉模型列表。
-		inputEl.addEventListener("focus", () => {
-			this.ensureLoaded();
-		});
-	}
-
-	/** 首次使用时拉取一次（聚焦触发）；已拉取则 noop。全局缓存命中则零请求。 */
-	private ensureLoaded(): void {
-		if (this.fetched) {
-			return;
-		}
-		this.fetched = true;
-		void fetchModelIds(this.apiUrl, this.apiKey).then((list) => {
-			this.ids = list;
-		});
+		// 惰性拉取：构造时不发请求。首次 getSuggestions 调用时（用户聚焦/输入触发）异步拉取，
+		// Obsidian AbstractInputSuggest 原生支持 getSuggestions 返回 Promise，会 await 后再渲染下拉。
+		// 这样首次聚焦即显示列表（不靠 focus 预拉取 fire-and-forget 回填 ids 的时序）。
 	}
 
 	/**
-	 * 按最新 apiUrl+apiKey 重新取模型列表回填实例：全局缓存按 apiUrl+apikey 作 key
-	 * 天然隔离（换端点/换 key 不命中，自动重新拉取；同 key 未过期直接命中）。
-	 * 用户编辑 API 地址 / API Key 后调用，让下拉候选跟上端点变化（建议去抖后调用，
-	 * 避免输入中间态逐字符触发请求）。调用后重置 fetched 标志，下次聚焦重新拉取。
+	 * 按最新 apiUrl+apiKey 重新取模型列表：重置 fetched 标志，下次 getSuggestions 触发时重新拉取。
+	 * 用户编辑 API 地址 / API Key 后调用（建议去抖后调用，避免输入中间态逐字符触发）。
 	 */
 	refresh(apiUrl: string, apiKey: string): void {
 		this.apiUrl = apiUrl;
 		this.apiKey = apiKey;
 		this.fetched = false;
 		this.ids = [];
-		// 端点变了立即拉取一份填实例（用户改完端点后，下拉候选应跟上）；
-		// 全局缓存命中则零请求，未命中才发网络请求。
-		void fetchModelIds(apiUrl, apiKey).then((list) => {
-			this.ids = list;
-			this.fetched = true;
-		});
 	}
 
-	protected getSuggestions(query: string): string[] {
+	protected async getSuggestions(query: string): Promise<string[]> {
+		if (!this.fetched) {
+			// 首次：拉取（全局缓存命中则零请求）；拉取完填 ids，Obsidian 会 await 此 Promise 后渲染下拉
+			this.fetched = true;
+			this.ids = await fetchModelIds(this.apiUrl, this.apiKey);
+		}
 		const ids = this.ids;
 		const value = query.trim();
 		if (!value) {

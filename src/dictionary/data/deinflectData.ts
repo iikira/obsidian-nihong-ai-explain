@@ -1486,7 +1486,6 @@ export const DEINFLECT_DATA = {
 		{ kanaIn: "ぜえ", kanaOut: "ずい", rulesIn: [], rulesOut: ["adj-i"] },
 		{ kanaIn: "っぜえ", kanaOut: "ずい", rulesIn: [], rulesOut: ["adj-i"] },
 		{ kanaIn: "れえ", kanaOut: "らい", rulesIn: [], rulesOut: ["adj-i"] },
-		{ kanaIn: "れえ", kanaOut: "らい", rulesIn: [], rulesOut: ["adj-i"] },
 		{
 			kanaIn: "ちぇえ",
 			kanaOut: "ちゃい",

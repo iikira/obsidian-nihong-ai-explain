@@ -97,10 +97,26 @@ export function parseEpubStructure(zip: Record<string, Uint8Array>): EpubStructu
 	return { contentRoot, title, author, chapters };
 }
 
-/** 拼接相对路径（内容根 + manifest href），统一用 / 分隔 */
+/** 拼接相对路径（内容根 + manifest href），正确解析 `.`/`..` 段，统一 / 分隔。
+ *  与 src/converter/index.ts 的 joinPath 行为一致（含 `..` 的 href 才能正确解析到上层目录）。 */
 function joinPath(root: string, href: string): string {
-	const cleanHref = href.replace(/^\.\//, "");
-	return root ? `${root}/${cleanHref}` : cleanHref;
+	const segments: string[] = [];
+	for (const part of (root || "").split("/")) {
+		if (part && part !== ".") {
+			segments.push(part);
+		}
+	}
+	for (const part of href.split("/")) {
+		if (!part || part === ".") {
+			continue;
+		}
+		if (part === "..") {
+			segments.pop();
+		} else {
+			segments.push(part);
+		}
+	}
+	return segments.join("/");
 }
 
 /** 从 href 提取无扩展名文件名，作为章节标题兜底 */
@@ -210,11 +226,6 @@ function parseHtmlDoc(html: string): Document {
 		throw new Error("HTML 解析失败");
 	}
 	return doc;
-}
-
-/** 供 index.ts 使用的辅助：把章节原始 XHTML 解析为可操作的 DOM */
-export function parseChapterHtml(html: string): Document {
-	return parseHtmlDoc(html);
 }
 
 /**

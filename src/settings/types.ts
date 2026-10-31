@@ -35,8 +35,6 @@ export interface NihongAIExplainSettings {
 	maxRetries: number;
 	/** 重试间隔（毫秒） */
 	retryInterval: number;
-	/** 单次请求超时（毫秒） */
-	requestTimeout: number;
 	/** 翻译目标语言 */
 	targetLanguage: string;
 	/** 词典卡片字号（px），0=使用默认 */
@@ -73,7 +71,6 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	temperature: 0.7,
 	maxRetries: 3,
 	retryInterval: 2000,
-	requestTimeout: 120000,
 	targetLanguage: "中文",
 	dictFontSize: 0,
 	ttsRate: 1.0,

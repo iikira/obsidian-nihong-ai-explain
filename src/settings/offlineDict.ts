@@ -13,14 +13,17 @@ function formatDictDesc(info: DictSourceInfo): string {
 		const seg: string[] = [];
 		if (s.installed) {
 			seg.push(`${s.title}: 已导入 ${s.installedRevision ?? "(未知)"}`);
-			if (s.latestRevision) {
+			if (!s.checksForUpdates) {
+				// 不检测更新（JMnedict 固定下载链接）：仅显示已导入状态，不加动作提示
+				// （按钮本身的「更新词典」语义已足够；实际行为是复用本地 zip 或重装）
+			} else if (s.latestRevision) {
 				seg.push(s.hasUpdate ? `最新 ${s.latestRevision}（可更新）` : `已是最新`);
 			} else {
 				seg.push("最新版本获取失败");
 			}
 		} else {
 			seg.push(`${s.title}: 未导入`);
-			if (s.latestRevision) {
+			if (s.checksForUpdates && s.latestRevision) {
 				seg.push(`最新 ${s.latestRevision}（可安装）`);
 			} else {
 				seg.push("点击右侧按钮安装");

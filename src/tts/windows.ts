@@ -238,13 +238,8 @@ let windowsVoicesCache: WindowsVoice[] | null = null;
 /** 日语语音的语言标签前缀（OneCore DisplayName 的 Language 属性，如 "ja-JP"） */
 const JAPANESE_LANG_PREFIX = "ja";
 
-/** 是否仅枚举日语语音（插件面向日语学习，非日语 OneCore 语音无意义） */
-let onlyJapanese = true;
-
-/** 设置是否仅枚举日语语音 */
-export function setWindowsVoicesJapaneseOnly(v: boolean): void {
-	onlyJapanese = v;
-}
+/** 仅枚举日语语音（插件面向日语学习，非日语 OneCore 语音无意义） */
+const ONLY_JAPANESE = true;
 
 /**
  * 枚举系统已安装的 OneCore 语音（默认过滤出日语的，如 Ayumi/Haruka/Ichiro）。
@@ -267,7 +262,7 @@ export async function listWindowsVoices(): Promise<WindowsVoice[]> {
 			{ timeout: 15000, windowsHide: true },
 			(err, stdout) => {
 				if (err) {
-				logWarn("tts", `枚举 Windows 语音失败: ${err.message}`);
+					logWarn("tts", `枚举 Windows 语音失败: ${err.message}`);
 					windowsProbe = false;
 					resolve([]);
 					return;
@@ -288,7 +283,7 @@ export async function listWindowsVoices(): Promise<WindowsVoice[]> {
 		if (!displayName) {
 			continue;
 		}
-		if (onlyJapanese && !lang.toLowerCase().startsWith(JAPANESE_LANG_PREFIX)) {
+		if (ONLY_JAPANESE && !lang.toLowerCase().startsWith(JAPANESE_LANG_PREFIX)) {
 			continue;
 		}
 		voices.push({

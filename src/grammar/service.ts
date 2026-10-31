@@ -1,159 +1,52 @@
-import { Notice, TFile, type Vault } from "obsidian";
+import { type Vault } from "obsidian";
 import { GRAMMAR_SYSTEM_PROMPT } from "../prompts";
-import { ensureFolder, hasForbiddenFileNameChar, resolveTargetPath } from "../utils";
-import {
-	CallLogger,
-	callChatCompletion,
-	type ChatMessage,
-	type UsageInfo,
-} from "../shared";
 import type { ModelGroup } from "../settings";
-import { logError, errMsg } from "../log";
-import { CancelledError, showCancellableProgress, throwIfCancelled } from "../cancel";
+import {
+	BaseNoteService,
+	type NoteServiceConfig,
+	type NoteServiceSpec,
+	type NoteUserContent,
+} from "../noteService";
 
 /** 语法拆解输入文本最大字符数：超过直接报错（语法拆解面向单句，过长无意义且浪费 token） */
 const GRAMMAR_MAX_INPUT_LEN = 200;
 
 /** 语法拆解用到的设置项子集 */
-interface GrammarConfig {
-	temperature: number;
-	maxRetries: number;
-	retryInterval: number;
+interface GrammarConfig extends NoteServiceConfig {
 	/** 语法拆解输出目录（相对 vault 根，空=根目录） */
 	grammarOutputDir: string;
 }
 
 export interface GrammarServiceOptions {
-	/** 读取语法拆解相关设置 */
 	settings: () => GrammarConfig;
-	/** 获取语法拆解用的大模型分组 */
 	getModelGroup: () => ModelGroup;
-	/** 占用/释放任务槽（沿用插件全局防重入） */
 	tryStartTask: (actionId: string, text: string) => boolean;
 	finishTask: (actionId: string, text: string) => void;
-	/** 当前 vault */
 	vault: () => Vault;
 }
 
-/** 语法拆解服务：封装大模型调用与落盘编排。与 AI 讲解同构，仅提示词/输出目录/模型分组独立。 */
-export class GrammarService {
-	private readonly opts: GrammarServiceOptions;
-
+/** 语法拆解服务：封装大模型调用与落盘编排。公共骨架继承 BaseNoteService，无词典注入。 */
+export class GrammarService extends BaseNoteService<GrammarConfig> {
 	constructor(opts: GrammarServiceOptions) {
-		this.opts = opts;
+		super(opts);
 	}
 
-	/**
-	 * 发起大模型调用（非流式 requestUrl，无跨域限制），带重试；返回 content + usage。
-	 * 重试、耗时、成败统一记进 logger；token 用量在调用方 setUsage 后 flush。
-	 * @param isCancelled 可选取消检查：重试 attempt 之间检查，已取消则停止重试
-	 */
-	private async callModel(
-		messages: ChatMessage[],
-		group: ModelGroup,
-		logger: CallLogger,
-		isCancelled?: () => boolean,
-	): Promise<{ content: string; usage: UsageInfo | null }> {
-		const { temperature, maxRetries, retryInterval } = this.opts.settings();
-		return callChatCompletion(messages, group, temperature, {
-			maxRetries,
-			retryInterval,
-			logger,
-			isCancelled,
-		});
+	protected get spec(): NoteServiceSpec {
+		return {
+			actionId: "grammar",
+			maxInputLen: GRAMMAR_MAX_INPUT_LEN,
+			taskBusyNotice: "语法拆解任务进行中",
+			actionName: "语法拆解",
+			systemPrompt: GRAMMAR_SYSTEM_PROMPT,
+		};
 	}
 
-	async explain(text: string): Promise<void> {
-		const clean = text.trim();
-		if (!clean) {
-			new Notice("选区为空");
-			return;
-		}
-		if (!this.opts.tryStartTask("grammar", clean)) {
-			new Notice(`「${clean}」语法拆解任务进行中`);
-			return;
-		}
-		try {
-			const cfg = this.opts.settings();
-			if (clean.length > GRAMMAR_MAX_INPUT_LEN) {
-				new Notice(
-					`选区过长（${clean.length} 字符），语法拆解最多 ${GRAMMAR_MAX_INPUT_LEN} 字符`,
-					8000,
-				);
-				return;
-			}
-			if (hasForbiddenFileNameChar(clean)) {
-				new Notice(
-					"选区含文件名非法字符（\\ / : * ? \" < > |），无法生成笔记",
-					8000,
-				);
-				return;
-			}
+	protected resolveOutputDir(cfg: GrammarConfig): string {
+		return cfg.grammarOutputDir;
+	}
 
-			const vault = this.opts.vault();
-			const targetPath = resolveTargetPath(clean, cfg.grammarOutputDir);
-			const existing = vault.getAbstractFileByPath(targetPath);
-			if (existing instanceof TFile) {
-				new Notice(`已存在，跳过: ${targetPath}`);
-				return;
-			}
-
-			const { notice, token } = showCancellableProgress("grammar");
-			const group = this.opts.getModelGroup();
-
-			const messages: ChatMessage[] = [
-				{ role: "system", content: GRAMMAR_SYSTEM_PROMPT },
-				{ role: "user", content: clean },
-			];
-
-			let content = "";
-			const logger = new CallLogger("llm");
-			try {
-				const res = await this.callModel(messages, group, logger, () => token.cancelled);
-				throwIfCancelled(token);
-				content = res.content;
-				if (res.usage) {
-					logger.setUsage(res.usage);
-				}
-			} catch (e) {
-				if (e instanceof CancelledError) {
-					notice.hide();
-					new Notice("已取消");
-					logger.flush();
-					return;
-				}
-				const msg = e instanceof Error ? e.message : String(e);
-				new Notice(`生成失败: ${msg}`, 8000);
-				logError("grammar", `语法拆解失败: ${errMsg(e)}`);
-				logger.flush();
-				return;
-			}
-			logger.flush();
-
-			throwIfCancelled(token);
-			const dir = (cfg.grammarOutputDir ?? "").trim();
-			try {
-				if (dir) {
-					await ensureFolder(vault, dir);
-				}
-				throwIfCancelled(token);
-				await vault.create(targetPath, content);
-			} catch (e) {
-				if (e instanceof CancelledError) {
-					notice.hide();
-					new Notice("已取消");
-					return;
-				}
-				const msg = e instanceof Error ? e.message : String(e);
-				new Notice(`写入文件失败: ${msg}`, 8000);
-				logError("grammar", `写入失败: ${errMsg(e)}`);
-				return;
-			}
-
-			notice.hide();
-			new Notice(`已生成: ${targetPath}`);
-		} finally {
-			this.opts.finishTask("grammar", clean);
-		}
+	protected async buildUserContent(clean: string): Promise<NoteUserContent> {
+		// 语法拆解无词典参考注入，直接用原文作 user 内容
+		return { content: clean };
 	}
 }

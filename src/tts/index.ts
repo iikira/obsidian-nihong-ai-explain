@@ -1,7 +1,7 @@
 import { Notice, requestUrl } from "obsidian";
 import { logInfo, logError, errMsg } from "../log";
 import { emitCacheChange } from "../cacheEvents";
-import { PersistentTTSCache, IndexedDBTTSCacheStorage, type TTSCacheStorage } from "./cache";
+import { PersistentTTSCache, IndexedDBTTSCacheStorage, mimeForEngine } from "./cache";
 import {
 	synthesizeWindows,
 	isWindowsTTSAvailable,
@@ -138,27 +138,12 @@ export function setTTSConfig(cfg: TtsConfig): void {
 	currentConfig = cfg;
 }
 
-/** 兼容旧接口：仅设语速 */
-export function setTTSRate(rate: number): void {
-	currentConfig = { ...currentConfig, rate };
-}
-
 /**
  * 初始化 TTS 持久化缓存：注入 IndexedDB 适配器并从持久层加载重建 blobUrl。
  * 由 main.ts onload 调用。加载前 getCache 命中 null（调用方重新合成），加载后命中持久层。
  */
 export async function initTTSCache(): Promise<void> {
 	ttsCache.setStorage(new IndexedDBTTSCacheStorage());
-	await ttsCache.load();
-}
-
-/** 测试用：注入自定义存储适配器（绕过 IndexedDB） */
-export function setTTSCacheStorageForTest(storage: TTSCacheStorage): void {
-	ttsCache.setStorage(storage);
-}
-
-/** 测试用：从持久层加载（注入存储后调用） */
-export async function loadTTSCacheForTest(): Promise<void> {
 	await ttsCache.load();
 }
 
@@ -298,13 +283,8 @@ async function fetchTTSBlob(text: string): Promise<FetchedBlob> {
 		throw new Error(`${engine} TTS 响应体为空`);
 	}
 	// 建临时 blobUrl 供播放；写缓存推迟到 play 成功后由 speakText 调 setCache
-	const mime = engine === "windows" ? "audio/wav" : "audio/mpeg";
-	const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+	const blobUrl = URL.createObjectURL(new Blob([buf], { type: mimeForEngine(engine) }));
 	return { url: blobUrl, buffer: buf };
-}
-
-export function isTTSAvailable(): boolean {
-	return true;
 }
 
 export function stopSpeak(): void {
@@ -439,9 +419,7 @@ export async function speakText(text: string): Promise<void> {
 				// setCache 内部会再建一个 blobUrl 存入缓存 Map，与正在播的临时 blobUrl 不同；
 				// 临时 blobUrl 此时已无需保留（audio 已 remove），由 setCache 写完后回收。
 				if (buffer) {
-					const mime =
-						currentConfig.engine === "windows" ? "audio/wav" : "audio/mpeg";
-					void setCache(chunks[idx], buffer, mime).then(() => {
+					void setCache(chunks[idx], buffer, mimeForEngine(currentConfig.engine)).then(() => {
 						URL.revokeObjectURL(blobUrl);
 					});
 				}

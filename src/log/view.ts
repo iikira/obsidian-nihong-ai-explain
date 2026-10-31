@@ -250,7 +250,7 @@ export class LogPanelView extends ItemView {
 			line.createSpan({ cls: "nihong-ai-log-tts-play", text: "▶" });
 			const meta = line.createDiv({ cls: "nihong-ai-log-tts-meta" });
 			meta.createSpan({ cls: "nihong-ai-log-cache-src", text: e.text });
-			// 仅显示引擎标签（Google/Edge/Windows）；voice 短名（如 ja-JP-NanamiNeural）对用户无意义，不展示
+			// 仅显示引擎标签（Google/Windows）；voice 短名（如 ja-JP-NanamiNeural）对用户无意义，不展示
 			meta.createSpan({ cls: "nihong-ai-log-cache-tag nihong-ai-log-tts-engine", text: engineLabel(e.engine) });
 			// 命中翻译缓存：展示译文
 			if (e.translation) {

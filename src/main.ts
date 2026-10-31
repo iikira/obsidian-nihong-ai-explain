@@ -26,8 +26,6 @@ import {
 	stopSpeak,
 	setTTSConfig,
 	initTTSCache,
-	getTTSCacheSize,
-	clearTTSCache,
 	closeTTSCache,
 } from "./tts";
 
@@ -380,16 +378,6 @@ export default class NihongAIExplainPlugin extends Plugin {
 	/** 停止朗读 */
 	stopSpeak(): void {
 		stopSpeak();
-	}
-
-	/** TTS 缓存条数 */
-	ttsCacheSize(): number {
-		return getTTSCacheSize();
-	}
-
-	/** 清空 TTS 缓存 */
-	clearTTSCache(): Promise<void> {
-		return clearTTSCache();
 	}
 
 	/** 应用「禁用 Lexis 悬浮窗」开关到当前 pill */

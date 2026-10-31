@@ -25,7 +25,7 @@ export function createCancelToken(): CancelToken {
  * 可取消的「正在生成…」进度通知：通知内嵌一个「取消」按钮，点击后置标志位并隐藏通知。
  * 返回 [notice, token]——notice 用于生成完成后手动 hide，token 供各 await 点检查。
  *
- * @param taskLabel 任务名（如 "AI 讲解" / "语法拆解"），仅作日志用
+ * @param taskLabel 任务名（如 "explain" / "grammar"，即日志 source），仅作日志用
  */
 export function showCancellableProgress(taskLabel: string): {
 	notice: Notice;

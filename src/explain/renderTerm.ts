@@ -2,17 +2,11 @@
  * 词典参考文本渲染：纯函数，不依赖 Obsidian/DOM/网络，便于单元测试。
  * 从 src/explain/service.ts 抽出。
  */
+import { toAccentCircle } from "../dictionary/accentCircle";
 
-/** 把声调核位置数字转成圆圈数字标记（⓪①②…），与词典弹窗一致 */
-export function toAccentCircle(position: number): string {
-	if (position === 0) {
-		return "⓪";
-	}
-	if (position >= 1 && position <= 20) {
-		return String.fromCodePoint(0x2460 + (position - 1));
-	}
-	return `(${position})`;
-}
+// toAccentCircle 已抽到 src/dictionary/accentCircle.ts（与词典弹窗共用同一实现）。
+// 此处 re-export 保持 renderTerm 的既有导出面，service.ts 与测试仍从此导入。
+export { toAccentCircle };
 
 /**
  * 把一条 Yomitan 词条的 glossary（结构化内容）渲染成参考文本行（已含缩进）。

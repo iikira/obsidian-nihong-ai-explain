@@ -1,25 +1,11 @@
 import { positionCard } from "../popupUtils";
 import { getFuriganaSegments } from "./furigana";
 import { tagLabel } from "./tagZh";
+import { toAccentCircle } from "./accentCircle";
 import type { LookupResult, ContentNode } from "./types";
 
 const CARD_CLASS = "nihong-ai-dict-popup";
 type State = "loading" | "result" | "error" | "empty";
-
-/**
- * 把声调核位置数字转成圆圈数字标记（与 AI 讲解提示词一致：⓪①②…）。
- * 0 → ⓪（平板型），1-20 → ①-⑳，>20 退化为带圈的数字。
- */
-function toAccentCircle(position: number): string {
-	if (position === 0) {
-		return "⓪";
-	}
-	if (position >= 1 && position <= 20) {
-		return String.fromCodePoint(0x2460 + (position - 1)); // ①=U+2460
-	}
-	// 超过 20 的少见情况：用括号数字兜底
-	return `(${position})`;
-}
 
 export class DictionaryPopup {
 	private el: HTMLDivElement | null = null;

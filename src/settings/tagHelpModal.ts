@@ -18,7 +18,7 @@ export class TagHelpModal extends Modal {
 
 		contentEl.createEl("p", {
 			cls: "nihong-ai-tag-help-hint",
-			text: "Jitendex 词典在查询结果里用这些 tag 标注词性/用法。点击 tag 可复制。下面按分类列出全部 tag 及其中文解释。",
+			text: "Jitendex 词典在查询结果里用这些 tag 标注词性/用法。下面按分类列出全部 tag 及其中文解释。",
 		});
 
 		// 按 group 分节

@@ -1,11 +1,11 @@
 import { unzipSync } from "fflate";
-import { parseEpubStructure, parseChapterHtml } from "./epub";
+import { parseEpubStructure } from "./epub";
 import { stripRuby } from "./ruby";
 import { createImageCollector, xhtmlToMarkdown } from "./htmlToMd";
 import { sanitizeFileName } from "../utils";
 import type { ConvertResult, EpubStructure, ExtractedImage } from "./types";
 
-export type { ConvertResult, Chapter, EpubStructure } from "./types";
+export type { ConvertResult, EpubStructure } from "./types";
 
 /**
  * 把一份 epub 的二进制字节转换成一组 Markdown 文档。
@@ -143,6 +143,3 @@ function joinPath(root: string, rel: string): string {
 	}
 	return segments.join("/");
 }
-
-/** 解析章节 XHTML 为 DOM（供需要进一步操作的场景） */
-export { parseChapterHtml };

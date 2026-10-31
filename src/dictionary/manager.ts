@@ -42,12 +42,10 @@ const JITENDEX_RELEASES_API =
 const JITENDEX_ZIP_NAME = "jitendex-yomitan.zip";
 
 /** JMnedict 词典源常量（GitHub release：yomidevs/jmdict-yomitan）
- *  JMnedict 无 releases-API tag，更新检查走 indexUrl（GET 后读 revision 字段） */
+ *  JMnedict 用固定下载链接，不做更新检测——点「更新词典」总是从固定链接重装 JMnedict */
 const JMNEDICT_ZIP_NAME = "JMnedict.zip";
 const JMNEDICT_DOWNLOAD_URL =
 	"https://github.com/yomidevs/jmdict-yomitan/releases/latest/download/JMnedict.zip";
-const JMNEDICT_INDEX_URL =
-	"https://github.com/yomidevs/jmdict-yomitan/releases/latest/download/JMnedict.json";
 /** JMnedict 独立 IndexedDB 库名（与 Jitendex 库 nihong-ai-dict 分离，互不影响） */
 const JMNEDICT_DB_NAME = "nihong-ai-dict-names";
 
@@ -126,8 +124,9 @@ export async function downloadChunked(
 		logWarn("dict", `分片下载失败，清理已下载文件: ${reason}`);
 		try {
 			await adapter.remove(path);
-		} catch {
-			// 文件可能不存在，忽略清理错误
+		} catch (e) {
+			// 文件可能不存在，忽略；但记日志便于排查非「不存在」的清理失败
+			logWarn("dict", `清理已下载文件失败（可能文件不存在）: ${errMsg(e)}`);
 		}
 	};
 	try {
@@ -204,6 +203,9 @@ export interface DictSourceStatus {
 	latestRevision: string | null;
 	/** latestRevision 非空且与 installedRevision 不同 */
 	hasUpdate: boolean;
+	/** 是否检测更新（Jitendex=true 走 GitHub releases API；JMnedict=false 用固定下载链接）。
+	 *  false 时 latestRevision 恒 null、hasUpdate 恒 false，UI 不应显示「获取失败」。 */
+	checksForUpdates: boolean;
 }
 
 /** 聚合多词典源信息（供设置页展示与一键更新判断） */
@@ -243,9 +245,6 @@ export class DictionaryManager {
 	private latestRevisionCache: string | null = null;
 	/** latestRevisionCache 的过期时间戳（ms）；过期后重新拉取。拉取失败则缩短缓存时间 */
 	private latestRevisionCacheExpire = 0;
-	/** fetchJMnedictLatestRevision 的会话内缓存（独立于 Jitendex 缓存） */
-	private jmnedictLatestCache: string | null = null;
-	private jmnedictLatestCacheExpire = 0;
 	/** latestRevision 缓存有效期（成功拉取后）：10 分钟 */
 	private static readonly LATEST_REV_TTL = 10 * 60 * 1000;
 	/** latestRevision 拉取失败后的重试间隔（失败也短暂缓存，避免短时反复撞限流）：1 分钟 */
@@ -263,12 +262,12 @@ export class DictionaryManager {
 		this.pluginDir = dir;
 	}
 
-	/** 注入网络请求函数（测试用，默认 obsidian requestUrl） */
+	/** 注入网络请求函数（测试用，默认 obsidian requestUrl） @internal */
 	setRequestFn(fn: typeof requestUrl): void {
 		this.requestFn = fn;
 	}
 
-	/** 注入文件适配器（测试用，默认 this.app.vault.adapter） */
+	/** 注入文件适配器（测试用，默认 this.app.vault.adapter） @internal */
 	setFileAdapter(adapter: ChunkFileAdapter | null): void {
 		this.fileAdapter = adapter;
 	}
@@ -293,9 +292,14 @@ export class DictionaryManager {
 			this.dbNames = await openDB<YomitanDB>(JMNEDICT_DB_NAME, 1, {
 				upgrade: (db) => DictionaryManager.upgradeSchema(db),
 			});
-			await this.loadAccents();
 		} catch (e) {
 			logError("dict", `IndexedDB 初始化失败: ${errMsg(e)}`);
+		}
+		// 声调数据独立加载：失败不影响词典可用（仅无声调显示），单独记日志
+		try {
+			await this.loadAccents();
+		} catch (e) {
+			logError("dict", `声调数据加载失败: ${errMsg(e)}`);
 		}
 	}
 
@@ -448,10 +452,8 @@ export class DictionaryManager {
 		if (!adapter || !this.pluginDir) {
 			throw new Error("插件目录未配置，无法保存下载文件");
 		}
-		const zipPath = this.dictZipPath(zipName);
-		if (!zipPath) {
-			throw new Error("插件目录未配置");
-		}
+		// pluginDir 已校验非空，dictZipPath 必返回 string
+		const zipPath = this.dictZipPath(zipName) as string;
 		await downloadChunked(this.requestFn, adapter, url, zipPath, {
 			chunkSize: DictionaryManager.CHUNK_SIZE,
 			maxRetries: DictionaryManager.CHUNK_MAX_RETRIES,
@@ -493,7 +495,7 @@ export class DictionaryManager {
 					? "（GitHub API 未认证请求限流 60 次/小时/IP，稍后重试或复用本地 zip）"
 					: "";
 				logWarn(
-					"nihong-ai",
+					"dict",
 					`拉取 Jitendex 最新版本失败: HTTP ${resp.status}${detail}${hint}`,
 				);
 				// 失败也短暂缓存 null，避免短时反复重试撞限流
@@ -517,42 +519,6 @@ export class DictionaryManager {
 		}
 	}
 
-	/**
-	 * JMnedict 最新版本：GET indexUrl（/latest/download/JMnedict.json，302 重定向，requestUrl 自动跟随）
-	 * → 读 revision 字段。失败返回 null，不抛。会话内缓存（同 Jitendex TTL 策略），独立缓存字段。
-	 */
-	async fetchJMnedictLatestRevision(): Promise<string | null> {
-		if (Date.now() < this.jmnedictLatestCacheExpire) {
-			return this.jmnedictLatestCache;
-		}
-		try {
-			const resp = await this.requestFn({
-				url: JMNEDICT_INDEX_URL,
-				method: "GET",
-				throw: false,
-			});
-			if (resp.status < 200 || resp.status >= 300) {
-				logWarn("dict", `拉取 JMnedict 最新版本失败: HTTP ${resp.status}`);
-				this.jmnedictLatestCache = null;
-				this.jmnedictLatestCacheExpire =
-					Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
-				return null;
-			}
-			const rev = (resp.json as { revision?: string }).revision ?? null;
-			const v = typeof rev === "string" && rev ? rev : null;
-			this.jmnedictLatestCache = v;
-			this.jmnedictLatestCacheExpire =
-				Date.now() + DictionaryManager.LATEST_REV_TTL;
-			return v;
-		} catch (e) {
-			logWarn("dict", `拉取 JMnedict 最新版本出错: ${errMsg(e)}`);
-			this.jmnedictLatestCache = null;
-			this.jmnedictLatestCacheExpire =
-				Date.now() + DictionaryManager.LATEST_REV_FAIL_TTL;
-			return null;
-		}
-	}
-
 	/** 聚合各词典源已导入版本与最新版本信息（供设置页展示与一键更新判断） */
 	async getSourceInfo(): Promise<DictSourceInfo> {
 		// Jitendex：查 Jitendex 库（title 含 "Jitendex"）
@@ -563,14 +529,9 @@ export class DictionaryManager {
 			jitLatest !== null &&
 			jitInstalled != null &&
 			jitLatest !== (jitInstalled.revision ?? null);
-		// JMnedict：查 JMnedict 库（title 含 "JMnedict"）
+		// JMnedict：查 JMnedict 库（title 含 "JMnedict"）。固定下载链接，不做更新检测——latestRevision 恒 null、hasUpdate 恒 false
 		const jmDicts = await this.getDictionariesInDb(this.dbNames);
 		const jmInstalled = jmDicts.find((d) => d.title.includes("JMnedict"));
-		const jmLatest = await this.fetchJMnedictLatestRevision();
-		const jmHasUpdate =
-			jmLatest !== null &&
-			jmInstalled != null &&
-			jmLatest !== (jmInstalled.revision ?? null);
 		const sources: DictSourceStatus[] = [
 			{
 				title: jitInstalled?.title ?? "Jitendex",
@@ -578,18 +539,20 @@ export class DictionaryManager {
 				installedRevision: jitInstalled?.revision ?? null,
 				latestRevision: jitLatest,
 				hasUpdate: jitHasUpdate,
+				checksForUpdates: true,
 			},
 			{
 				title: jmInstalled?.title ?? "JMnedict",
 				installed: jmInstalled != null,
 				installedRevision: jmInstalled?.revision ?? null,
-				latestRevision: jmLatest,
-				hasUpdate: jmHasUpdate,
+				latestRevision: null,
+				hasUpdate: false,
+				checksForUpdates: false,
 			},
 		];
 		return {
 			sources,
-			anyHasUpdate: jitHasUpdate || jmHasUpdate,
+			anyHasUpdate: jitHasUpdate,
 			anyInstalled: jitInstalled != null || jmInstalled != null,
 		};
 	}
@@ -603,10 +566,8 @@ export class DictionaryManager {
 		if (!adapter || !this.pluginDir) {
 			return null;
 		}
-		const zipPath = this.dictZipPath(zipName);
-		if (!zipPath) {
-			return null;
-		}
+		// pluginDir 已校验非空，dictZipPath 必返回 string
+		const zipPath = this.dictZipPath(zipName) as string;
 		try {
 			if (!(await adapter.exists(zipPath))) {
 				return null;

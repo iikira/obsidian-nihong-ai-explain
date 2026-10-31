@@ -43,8 +43,28 @@ const stubPlugin = {
 		}));
 		build.onLoad({ filter: /.*/, namespace: "stub-obsidian" }, () => ({
 			// 导出最小桩：speakText/各模块用到的 Notice（类）、requestUrl 等；
-			// 测试不应真实触网，requestUrl 在测试中通过缓存命中绕开
-			contents: "module.exports = { Notice: function Notice() {}, requestUrl: async () => ({ status: 200, json: { data: [] }, arrayBuffer: new ArrayBuffer(0) }), normalizePath: (p) => p };",
+			// 测试不应真实触网，requestUrl 在测试中通过缓存命中绕开。
+			// AbstractInputSuggest / PopoverSuggest：ModelSuggest 集成测试需实例化，桩为最小可用基类
+			// （构造存 app/inputEl，提供 limit 字段 + setValue/getValue/close/open/selectSuggestion 空方法）。
+			contents: [
+				"module.exports = {",
+				"  Notice: function Notice() {},",
+				// requestUrl 桩返非空模型列表：ModelSuggest 集成测试走 fetchModelIds 默认 fetcher（即此桩）。",
+				// 其他测试（modelSuggest.test.ts / ttsInvalidAudio.test.ts）各自注入 fetcher，不走此桩。",
+				"  requestUrl: async () => ({ status: 200, json: { data: [{ id: 'model-a' }, { id: 'model-b' }] }, arrayBuffer: new ArrayBuffer(0) }),",
+				"  normalizePath: (p) => p,",
+				// prepareFuzzySearch：ModelSuggest.getSuggestions 带 query 时调用；桩为简单 includes 子串匹配。",
+				"  prepareFuzzySearch: (query) => { const q = query.toLowerCase(); return (s) => String(s).toLowerCase().includes(q); },",
+				"  PopoverSuggest: class PopoverSuggest { constructor(app, scope) { this.app = app; } close() {} open() {} },",
+				"  AbstractInputSuggest: class AbstractInputSuggest {",
+				"    constructor(app, inputEl) { this.app = app; this.inputEl = inputEl; this.limit = 100; }",
+				"    setValue(v) { this.inputEl && (this.inputEl.value = v); }",
+				"    getValue() { return this.inputEl ? this.inputEl.value : ''; }",
+				"    close() {} open() {}",
+				"    selectSuggestion(_v, _evt) {}",
+				"  },",
+				"};",
+			].join("\n"),
 			loader: "js",
 		}));
 		build.onResolve({ filter: /^electron$/ }, (args) => ({

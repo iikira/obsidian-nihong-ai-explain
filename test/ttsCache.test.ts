@@ -297,37 +297,4 @@ test("set 淘汰时持久层删除 fire-and-forget：内存层立即清，持久
 	await new Promise((r) => setTimeout(r, 0));
 });
 
-// ====== load 超时测试 ======
-
-test("load 超时不永久挂起：storage.getAll 不结算时超时后标记已加载", async () => {
-	const hs = new HookableStorage();
-	// getAll 永不结算（模拟 IndexedDB 被阻塞永久挂起）
-	hs.getAll = () => new Promise(() => {});
-	const c = new PersistentTTSCache();
-	c.setStorage(hs);
-	// loadWithTimeout 用 window.setTimeout（5s）；本测试环境无 window，桩一个最小 window，
-	// 并把超时压成 ~50ms 加速测试（不等真实 5s）。
-	const savedWindow = (globalThis as { window?: typeof globalThis.window }).window;
-	(globalThis as { window: typeof globalThis.window }).window = {
-		setTimeout: ((cb: (...a: unknown[]) => void, ms?: number) =>
-			setTimeout(cb, Math.min(ms ?? 0, 50)) as unknown as number) as typeof window.setTimeout,
-		clearTimeout: ((id: number) => clearTimeout(id as unknown as ReturnType<typeof setTimeout>)) as typeof window.clearTimeout,
-	} as typeof globalThis.window;
-	try {
-		const start = Date.now();
-		await c.load();
-		const elapsed = Date.now() - start;
-		assert.ok(c.isLoaded(), "超时后应标记已加载");
-		assert.ok(elapsed < 1000, `应在 ~50ms 内超时而非真等 5s（实际 ${elapsed}ms）`);
-		assert.equal(c.size(), 0); // 加载失败，内存为空
-	} finally {
-		if (savedWindow === undefined) {
-			delete (globalThis as { window?: typeof globalThis.window }).window;
-		} else {
-			(globalThis as { window: typeof globalThis.window }).window = savedWindow;
-		}
-	}
-});
-
-
 

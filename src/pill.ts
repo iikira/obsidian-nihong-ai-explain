@@ -100,12 +100,6 @@ export class SelectionPill {
 		this.observer.observe(document.body, { childList: true, subtree: false });
 	}
 
-	/** 动态替换 actions，下次 pill 显示时生效；当前已显示的 pill 会立即重建按钮组 */
-	setActions(actions: PillAction[]): void {
-		this.actions = actions;
-		this.refreshVisiblePill();
-	}
-
 	/**
 	 * 切换「禁用 Lexis 悬浮窗」开关。
 	 * - true：完全阻止 Lexis 自身悬浮窗弹出——检测到 .lexis-sel-pill 加入 DOM

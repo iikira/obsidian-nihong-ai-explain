@@ -540,44 +540,8 @@ test("fetchLatestRevision：请求抛异常返回 null", async () => {
 	assert.equal(r, null, "异常应返回 null");
 });
 
-test("fetchJMnedictLatestRevision：成功返回 revision 字段", async () => {
-	const m = await newMgrWithMock(async (params) => {
-		assert.ok(params.url.includes("JMnedict.json"), `应请求 index.json，实际: ${params.url}`);
-		return { status: 200, json: { revision: "JMnedict.2026-10-30" }, arrayBuffer: new ArrayBuffer(0), headers: {} };
-	});
-	const rev = await m.fetchJMnedictLatestRevision();
-	assert.equal(rev, "JMnedict.2026-10-30");
-});
-
-test("fetchJMnedictLatestRevision：HTTP 错误返回 null", async () => {
-	const m = await newMgrWithMock(async () => {
-		return { status: 404, json: {}, arrayBuffer: new ArrayBuffer(0), headers: {} };
-	});
-	const r = await m.fetchJMnedictLatestRevision();
-	assert.equal(r, null, "404 应返回 null");
-});
-
-test("fetchJMnedictLatestRevision：缓存独立于 Jitendex 缓存", async () => {
-	let jitCalls = 0;
-	let jmCalls = 0;
-	const m = await newMgrWithMock(async (params) => {
-		if (params.url.includes("api.github.com")) {
-			jitCalls++;
-			return { status: 200, json: { tag_name: "jit-2026" }, arrayBuffer: new ArrayBuffer(0), headers: {} };
-		}
-		jmCalls++;
-		return { status: 200, json: { revision: "jm-2026" }, arrayBuffer: new ArrayBuffer(0), headers: {} };
-	});
-	await m.fetchLatestRevision();
-	await m.fetchJMnedictLatestRevision();
-	assert.equal(jitCalls, 1);
-	assert.equal(jmCalls, 1);
-	// 再各调一次，应各自命中缓存
-	await m.fetchLatestRevision();
-	await m.fetchJMnedictLatestRevision();
-	assert.equal(jitCalls, 1, "Jitendex 缓存独立命中");
-	assert.equal(jmCalls, 1, "JMnedict 缓存独立命中");
-});
+// fetchJMnedictLatestRevision 已删除（JMnedict 改用固定下载链接，不做更新检测）——
+// 相关测试随之移除。getSourceInfo 里 JMnedict 的 latestRevision 恒为 null、hasUpdate 恒为 false。
 
 // ====== updateDictionaries 编排测试 ======
 // 通过 setRequestFn 注入 mock 网络（fetch + 分片下载），setFileAdapter 注入内存版文件适配器，
@@ -613,10 +577,10 @@ function makeMemoryFileAdapter(): { adapter: import("../src/dictionary/manager")
 	return { adapter, files };
 }
 
-/** 构造 mock requestFn：fetch（GitHub API/JMnedict index）返回 JSON；下载（HEAD+GET Range）返回 zip 字节 */
+/** 构造 mock requestFn：fetch（GitHub API）返回 JSON；下载（HEAD+GET Range）返回 zip 字节。
+ *  JMnedict 不再做更新检测（固定下载链接），故 mock 不再处理 JMnedict.json fetch。 */
 function makeUpdateRequestFn(opts: {
 	jitLatest: string | null;
-	jmLatest: string | null;
 	jitZipBytes: Uint8Array;
 	jmZipBytes: Uint8Array;
 }): (params: { url: string; method: string; headers?: Record<string, string> }) => Promise<{ status: number; json: unknown; arrayBuffer: ArrayBuffer; headers: Record<string, string> }> {
@@ -625,11 +589,6 @@ function makeUpdateRequestFn(opts: {
 		if (params.url.includes("api.github.com")) {
 			if (opts.jitLatest === null) return { status: 403, json: { message: "rate limit" }, arrayBuffer: new ArrayBuffer(0), headers: {} };
 			return { status: 200, json: { tag_name: opts.jitLatest }, arrayBuffer: new ArrayBuffer(0), headers: {} };
-		}
-		// JMnedict fetch（index.json）
-		if (params.url.endsWith("JMnedict.json")) {
-			if (opts.jmLatest === null) return { status: 404, json: {}, arrayBuffer: new ArrayBuffer(0), headers: {} };
-			return { status: 200, json: { revision: opts.jmLatest }, arrayBuffer: new ArrayBuffer(0), headers: {} };
 		}
 		// 下载（HEAD/GET）——按 url 区分 Jitendex/JMnedict zip
 		const isJit = params.url.includes("jitendex-yomitan.zip");
@@ -661,7 +620,6 @@ test("updateDictionaries：全新安装，并行下载 + 串行导入两本，up
 	const { adapter } = makeMemoryFileAdapter();
 	const m = await newMgrWithMock(makeUpdateRequestFn({
 		jitLatest: "2026-10-31",
-		jmLatest: "2026-10-31",
 		jitZipBytes: jitZip,
 		jmZipBytes: jmZip,
 	}));
@@ -689,7 +647,6 @@ test("updateDictionaries：已导入且==latest 时跳过，updatedCount=0", asy
 	const { adapter } = makeMemoryFileAdapter();
 	const m = await newMgrWithMock(makeUpdateRequestFn({
 		jitLatest: "2026-10-31",
-		jmLatest: "2026-10-31",
 		jitZipBytes: jitZip,
 		jmZipBytes: jmZip,
 	}));
@@ -726,7 +683,6 @@ test("updateDictionaries：progress 回调按源 + stage 触发", async () => {
 	const { adapter } = makeMemoryFileAdapter();
 	const m = await newMgrWithMock(makeUpdateRequestFn({
 		jitLatest: "2026-10-31",
-		jmLatest: "2026-10-31",
 		jitZipBytes: jitZip,
 		jmZipBytes: jmZip,
 	}));
@@ -763,7 +719,6 @@ test("updateDictionaries：本地 zip 版本==latest 时复用，跳过下载", 
 	files.set("/test-plugin/JMnedict.zip", jmZip.slice().buffer);
 	const m = await newMgrWithMock(makeUpdateRequestFn({
 		jitLatest: "2026-10-31",
-		jmLatest: "2026-10-31",
 		jitZipBytes: jitZip,
 		jmZipBytes: jmZip,
 	}));

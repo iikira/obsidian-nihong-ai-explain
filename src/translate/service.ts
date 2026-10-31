@@ -119,7 +119,7 @@ export class TranslateService {
 				const { content: result, usage } = await this.callModel(
 					messages,
 					this.opts.getModelGroup(),
-					0.3,
+					this.opts.settings().temperature,
 					logger,
 				);
 				if (usage) {

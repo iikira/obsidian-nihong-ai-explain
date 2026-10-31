@@ -1,36 +1,28 @@
-import { Notice, TFile, type Vault } from "obsidian";
+import { type Vault } from "obsidian";
 import { EXPLAIN_SYSTEM_PROMPT } from "../prompts";
-import { ensureFolder, hasForbiddenFileNameChar, MAX_WORD_LEN, resolveTargetPath } from "../utils";
-import {
-	CallLogger,
-	callChatCompletion,
-	type ChatMessage,
-	type UsageInfo,
-} from "../shared";
+import { MAX_WORD_LEN } from "../utils";
+import type { ModelGroup } from "../settings";
 import { toAccentCircle, renderTermEntry } from "./renderTerm";
 import { renderNamesDictTerm } from "../dictionary/tagZh";
-import { CancelledError, showCancellableProgress, throwIfCancelled } from "../cancel";
-import type { ModelGroup } from "../settings";
 import type { LookupResult } from "../dictionary/types";
-import { logWarn, logError, logInfo, errMsg } from "../log";
+import { logWarn, errMsg } from "../log";
+import {
+	BaseNoteService,
+	type NoteServiceConfig,
+	type NoteServiceSpec,
+	type NoteUserContent,
+} from "../noteService";
 
 /** 讲解用到的设置项子集 */
-interface ExplainConfig {
-	temperature: number;
-	maxRetries: number;
-	retryInterval: number;
+interface ExplainConfig extends NoteServiceConfig {
 	outputDir: string;
 }
 
 export interface ExplainServiceOptions {
-	/** 读取讲解相关设置 */
 	settings: () => ExplainConfig;
-	/** 获取讲解用的大模型分组 */
 	getModelGroup: () => ModelGroup;
-	/** 占用/释放任务槽（沿用插件全局防重入） */
 	tryStartTask: (actionId: string, text: string) => boolean;
 	finishTask: (actionId: string, text: string) => void;
-	/** 当前 vault */
 	vault: () => Vault;
 	/** 查离线词典（未加载/未导入时返回空数组） */
 	lookup: (text: string) => Promise<LookupResult[]>;
@@ -40,55 +32,58 @@ export interface ExplainServiceOptions {
 	getAccents: (expression: string, reading: string) => number[];
 }
 
-/** 讲解服务：封装流式调用、词典参考注入与落盘编排。 */
-export class ExplainService {
-	private readonly opts: ExplainServiceOptions;
+/** 讲解服务：封装大模型调用、词典参考注入与落盘编排。公共骨架继承 BaseNoteService。 */
+export class ExplainService extends BaseNoteService<ExplainConfig> {
+	private readonly dictOpts: Pick<
+		ExplainServiceOptions,
+		"lookup" | "isDictionaryReady" | "getAccents"
+	>;
 
 	constructor(opts: ExplainServiceOptions) {
-		this.opts = opts;
+		super(opts);
+		this.dictOpts = opts;
 	}
 
-	/**
-	 * 发起大模型调用（非流式 requestUrl，无跨域限制），带重试；返回 content + usage。
-	 * 重试、耗时、成败统一记进 logger；token 用量在调用方 setUsage 后 flush。
-	 * @param isCancelled 可选取消检查：重试 attempt 之间检查，已取消则停止重试
-	 */
-	private async callModel(
-		messages: ChatMessage[],
-		group: ModelGroup,
-		logger: CallLogger,
-		isCancelled?: () => boolean,
-	): Promise<{ content: string; usage: UsageInfo | null }> {
-		const { temperature, maxRetries, retryInterval } = this.opts.settings();
-		return callChatCompletion(messages, group, temperature, {
-			maxRetries,
-			retryInterval,
-			logger,
-			isCancelled,
-		});
+	protected get spec(): NoteServiceSpec {
+		return {
+			actionId: "explain",
+			maxInputLen: MAX_WORD_LEN,
+			taskBusyNotice: "AI 讲解任务进行中",
+			actionName: "AI 讲解",
+			systemPrompt: EXPLAIN_SYSTEM_PROMPT,
+		};
+	}
+
+	protected resolveOutputDir(cfg: ExplainConfig): string {
+		return cfg.outputDir;
+	}
+
+	protected async buildUserContent(clean: string): Promise<NoteUserContent> {
+		// 查离线词典（异步），命中则把结果作为参考拼进 user prompt；构造后由基类 throwIfCancelled
+		const dictRef = await this.buildDictionaryReference(clean);
+		return {
+			content: dictRef
+				? `请讲解以下日语单词：${clean}\n\n` +
+					`该日语单词的词典查询结果如下，用于参考\n` +
+					"```\n" + dictRef + "\n```\n"
+				: `请讲解以下日语单词：${clean}`,
+			throwIfCancelled: undefined,
+		};
 	}
 
 	/**
 	 * 查离线词典并把结果格式化成参考文本（含声调、词性标签、释义、例句）。
 	 * 格式仿照词典弹窗的前端展示，按 expression|reading 分组，词头一行，
-	 * 其下逐 sense-group 输出词性标签、义项序号与释义、例句。例如：
-	 *   病む | やむ ①
-	 *   5-dan; intransitive;
-	 *   ① to fall ill
-	 *     彼女は痛風を病んでいる。
-	 *     She is affected with the gout.
-	 *   5-dan; transitive;
-	 *   ② to suffer from (e.g. a disease); to have something wrong with (e.g. an inner organ)
-	 * 例句日文去振假名与空格；来源署名（JMdict | Tatoeba）丢弃。
+	 * 其下逐 sense-group 输出词性标签、义项序号与释义、例句。
 	 * 词典未导入/未加载/查无结果时返回空字符串。
 	 */
 	private async buildDictionaryReference(word: string): Promise<string> {
-		if (!this.opts.isDictionaryReady()) {
+		if (!this.dictOpts.isDictionaryReady()) {
 			return "";
 		}
 		let results: LookupResult[] = [];
 		try {
-			results = await this.opts.lookup(word);
+			results = await this.dictOpts.lookup(word);
 		} catch (e) {
 			logWarn("explain", `词典查询失败: ${errMsg(e)}`);
 			return "";
@@ -114,7 +109,7 @@ export class ExplainService {
 			// JMnedict 风格：reading 为空，glossary 是读音列表（与 popup 一致：tag + 读音）
 			const isNamesDict = reading === "";
 			if (!isNamesDict) {
-				const accents = this.opts.getAccents(expression, reading);
+				const accents = this.dictOpts.getAccents(expression, reading);
 				const accentStr = accents.length
 					? " " + accents.map((p) => toAccentCircle(p)).join(",")
 					: "";
@@ -136,114 +131,5 @@ export class ExplainService {
 			}
 		}
 		return lines.join("\n");
-	}
-
-	async explain(word: string): Promise<void> {
-		const clean = word.trim();
-		if (!clean) {
-			new Notice("选区为空");
-			return;
-		}
-		if (!this.opts.tryStartTask("explain", clean)) {
-			new Notice(`「${clean}」AI 讲解任务进行中`);
-			return;
-		}
-		try {
-			const cfg = this.opts.settings();
-			if (clean.length > MAX_WORD_LEN) {
-				new Notice(
-					`选区过长（${clean.length} 字符），AI 讲解最多 ${MAX_WORD_LEN} 字符`,
-					8000,
-				);
-				return;
-			}
-			if (hasForbiddenFileNameChar(clean)) {
-				new Notice(
-					"选区含文件名非法字符（\\ / : * ? \" < > |），无法生成笔记",
-					8000,
-				);
-				return;
-			}
-
-			const vault = this.opts.vault();
-			const targetPath = resolveTargetPath(clean, cfg.outputDir);
-			const existing = vault.getAbstractFileByPath(targetPath);
-			if (existing instanceof TFile) {
-				new Notice(`已存在，跳过: ${targetPath}`);
-				return;
-			}
-
-			const { notice, token } = showCancellableProgress("explain");
-			const group = this.opts.getModelGroup();
-
-			// 查离线词典，命中则把结果作为参考拼进 user prompt
-			const dictRef = await this.buildDictionaryReference(clean);
-			throwIfCancelled(token);
-			let userContent: string;
-			if (dictRef) {
-				userContent =
-					`请讲解以下日语单词：${clean}\n\n` +
-					`该日语单词的词典查询结果如下，用于参考\n` +
-					"```\n" + dictRef + "\n```\n";
-			} else {
-				userContent = `请讲解以下日语单词：${clean}`;
-			}
-
-			logInfo("explain", `用户提示词:\n${userContent}`);
-
-			const messages: ChatMessage[] = [
-				{ role: "system", content: EXPLAIN_SYSTEM_PROMPT },
-				{ role: "user", content: userContent },
-			];
-
-			let content = "";
-			const logger = new CallLogger("llm");
-			try {
-				const res = await this.callModel(messages, group, logger, () => token.cancelled);
-				throwIfCancelled(token);
-				content = res.content;
-				if (res.usage) {
-					logger.setUsage(res.usage);
-				}
-			} catch (e) {
-				if (e instanceof CancelledError) {
-					notice.hide();
-					new Notice("已取消");
-					logger.flush();
-					return;
-				}
-				const msg = e instanceof Error ? e.message : String(e);
-				new Notice(`生成失败: ${msg}`, 8000);
-				logError("explain", `生成失败: ${errMsg(e)}`);
-				logger.flush();
-				return;
-			}
-			logger.flush();
-
-			throwIfCancelled(token);
-			const dir = (cfg.outputDir ?? "").trim();
-			try {
-				if (dir) {
-					await ensureFolder(vault, dir);
-				}
-				throwIfCancelled(token);
-				await vault.create(targetPath, content);
-			} catch (e) {
-				if (e instanceof CancelledError) {
-					notice.hide();
-					new Notice("已取消");
-					return;
-				}
-				const msg = e instanceof Error ? e.message : String(e);
-				new Notice(`写入文件失败: ${msg}`, 8000);
-				logError("explain", `写入失败: ${errMsg(e)}`);
-				return;
-			}
-
-			notice.hide();
-			new Notice(`已生成: ${targetPath}`);
-		} finally {
-			this.opts.finishTask("explain", clean);
-		}
 	}
 }

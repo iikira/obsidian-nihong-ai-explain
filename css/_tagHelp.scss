@@ -1,6 +1,8 @@
 // 词典 tag 帮助弹窗（TagHelpModal）：Jitendex tag 中文解释表
 .nihong-ai-tag-help {
 	max-width: 640px;
+	// 确保弹窗内文字可鼠标选择（Obsidian Modal 某些主题默认禁用文本选择）
+	user-select: text;
 }
 
 .nihong-ai-tag-help-hint {

@@ -42,18 +42,6 @@ export function renderSamplingSection(ctx: SettingsContext, body: HTMLElement): 
 				}),
 		);
 	new Setting(body)
-		.setName("单次请求超时 (毫秒)")
-		.addText((text) =>
-			text
-				.setPlaceholder("120000")
-				.setValue(String(ctx.plugin.settings.requestTimeout))
-				.onChange(async (value) => {
-					const n = Math.max(1000, Math.floor(Number(value) || 0));
-					ctx.plugin.settings.requestTimeout = n;
-					await ctx.plugin.saveSettings();
-				}),
-		);
-	new Setting(body)
 		.setName("翻译目标语言")
 		.setDesc("翻译功能的目标语言，如「中文」「英文」等。")
 		.addText((text) =>

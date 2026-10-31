@@ -32,6 +32,12 @@ export interface TTSCacheStorage {
 /** TTS 缓存容量（条数，与原纯内存版一致） */
 const TTS_CACHE_SIZE = 128;
 
+/** 按引擎推断音频 MIME：windows=audio/wav（PCM），其余（google）=audio/mpeg。
+ *  缓存键建 blobUrl 与持久层重建 blobUrl 都用此推断，集中一处避免加引擎时改两处。 */
+export function mimeForEngine(engine: string): string {
+	return engine === "windows" ? "audio/wav" : "audio/mpeg";
+}
+
 /**
  * TTS 持久化缓存：内存 blobUrl Map + 字节持久层，LRU 淘汰。
  *
@@ -61,34 +67,21 @@ export class PersistentTTSCache {
 	 * 从持久层加载字节、重建 blob URL 填内存层。
 	 * 用持久层保存的 LRU 顺序（getOrder）决定加载顺序（最近使用在前），保证重启后顺序与关闭前一致。
 	 * 加载后超容量的旧条目按 LRU 淘汰（持久层也删）。
+	 *
+	 * 不加超时：main.ts onload 用 `void initTTSCache()` 不 await，即使 IndexedDB 在 Obsidian 热重载下
+	 * 被旧连接阻塞而永久挂起，也不阻塞 Obsidian 启动/朗读（播放走重新合成，不依赖持久层）。
+	 * close()（onunload 调）关闭 DB 连接已大幅规避热重载升级阻塞。
 	 */
 	async load(): Promise<void> {
 		if (!this.storage || this.loaded) {
 			return;
 		}
 		try {
-			// 加超时保护：IndexedDB 在 Obsidian 热重载下可能被旧连接阻塞而永久挂起，
-			// 若 5s 内未完成加载则放弃（标记已加载、内存为空），不阻塞朗读。播放不依赖持久层。
-			await this.loadWithTimeout(5000);
+			await this.loadFromStorage();
 		} catch (e) {
-			// 加载失败/超时不阻塞朗读：标记已加载，内存为空，后续重新合成
+			// 加载失败不阻塞朗读：标记已加载，内存为空，后续重新合成
 			logError("tts", `TTS 缓存加载失败: ${errMsg(e)}`);
 			this.loaded = true;
-		}
-	}
-
-	/** 带超时的加载（超时则 reject，由 load() catch 兜底） */
-	private async loadWithTimeout(ms: number): Promise<void> {
-		let timer: number | undefined;
-		const timeout = new Promise<never>((_, reject) => {
-			timer = window.setTimeout(() => reject(new Error(`缓存加载超时 ${ms}ms`)), ms);
-		});
-		try {
-			await Promise.race([this.loadFromStorage(), timeout]);
-		} finally {
-			if (timer !== undefined) {
-				window.clearTimeout(timer);
-			}
 		}
 	}
 
@@ -102,9 +95,9 @@ export class PersistentTTSCache {
 		const orderedKeys = order.length > 0 ? [...order].reverse() : all.map((e) => e.key);
 		const keep = orderedKeys.slice(0, TTS_CACHE_SIZE).filter((k) => bufByKey.has(k));
 		for (const key of keep) {
-			// 从 key（engine::voice::text）推断 mime：windows=audio/wav，其余=audio/mpeg
-			const mime = key.startsWith("windows::") ? "audio/wav" : "audio/mpeg";
-			const url = URL.createObjectURL(new Blob([bufByKey.get(key)!], { type: mime }));
+			// 从 key（engine::voice::text）前缀推断引擎，再推断 mime
+			const engine = key.slice(0, key.indexOf("::"));
+			const url = URL.createObjectURL(new Blob([bufByKey.get(key)!], { type: mimeForEngine(engine) }));
 			this.blobUrls.set(key, url);
 		}
 		// 淘汰超容量或 order 里多余的旧条目（持久层 audio + order 都清）
@@ -136,11 +129,10 @@ export class PersistentTTSCache {
 			return;
 		}
 		const order = [...this.blobUrls.keys()].reverse();
-		try {
-			void this.storage.setOrder(order);
-		} catch {
-			// noop
-		}
+		// fire-and-forget：与 put/delete 一致，rejection 不阻塞调用方，仅记日志
+		void this.storage.setOrder(order).catch((e) => {
+			logWarn("tts", `TTS 持久化顺序失败: ${errMsg(e)}`);
+		});
 	}
 
 	/**
