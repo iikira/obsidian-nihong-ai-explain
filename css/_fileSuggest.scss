@@ -1,0 +1,12 @@
+// 设置页：文件夹下拉建议（FolderSuggest 的候选项）
+.nihong-ai-file-suggest-name {
+	font-weight: 600;
+}
+
+.nihong-ai-file-suggest-path {
+	overflow: hidden;
+	color: var(--text-muted);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

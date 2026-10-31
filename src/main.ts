@@ -28,6 +28,7 @@ import {
 	initTTSCache,
 	getTTSCacheSize,
 	clearTTSCache,
+	closeTTSCache,
 } from "./tts";
 
 
@@ -265,6 +266,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.converterService = null;
 		this.dictionaryManager = null;
 		stopSpeak();
+		// 关闭 TTS 缓存 IndexedDB 连接，避免重载后升级被旧连接阻塞（Obsidian 热重载常见卡死点）
+		void closeTTSCache();
 	}
 
 	async loadSettings(): Promise<void> {

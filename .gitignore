@@ -157,3 +157,5 @@ src/tts/onecore/onecore_tts.exe
 # Test build output (esbuild-compiled test files)
 test-dist/
 
+# 编译生成的样式表（源码在 css/*.scss，由 esbuild.config.mjs 编译为 styles.css）
+styles.css

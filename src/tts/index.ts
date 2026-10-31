@@ -101,13 +101,18 @@ function cacheKey(text: string): string {
 
 function getCache(text: string): string | null {
 	const k = cacheKey(text);
-	return ttsCache.get(k);
+	const url = ttsCache.get(k);
+	if (url !== null) {
+		// 命中缓存：LRU 提升后通知缓存视图刷新（顺序变化需反映）
+		emitCacheChange("tts");
+	}
+	return url;
 }
 
 /** 写入缓存：存字节到持久层 + 建 blobUrl 到内存层；返回 blobUrl 供播放。LRU 淘汰两层同步 */
-async function setCache(text: string, buffer: ArrayBuffer): Promise<string> {
+async function setCache(text: string, buffer: ArrayBuffer, mime?: string): Promise<string> {
 	const k = cacheKey(text);
-	const url = await ttsCache.set(k, buffer);
+	const url = await ttsCache.set(k, buffer, mime);
 	emitCacheChange("tts");
 	return url;
 }
@@ -145,6 +150,11 @@ export async function loadTTSCacheForTest(): Promise<void> {
 export async function clearTTSCache(): Promise<void> {
 	await ttsCache.clear();
 	emitCacheChange("tts");
+}
+
+/** 关闭 TTS 缓存底层 DB 连接（插件卸载时调用，避免重载后升级被旧连接阻塞） */
+export async function closeTTSCache(): Promise<void> {
+	await ttsCache.close();
 }
 
 export function getTTSCacheSize(): number {
@@ -255,7 +265,8 @@ async function fetchTTSBlob(text: string): Promise<string> {
 		throw new Error(`${engine} TTS 响应体为空`);
 	}
 	// 存字节到持久层 + 建 blobUrl 到内存层，返回 blobUrl 供播放
-	const blobUrl = await setCache(text, buf);
+	const mime = engine === "windows" ? "audio/wav" : "audio/mpeg";
+	const blobUrl = await setCache(text, buf, mime);
 	return blobUrl;
 }
 

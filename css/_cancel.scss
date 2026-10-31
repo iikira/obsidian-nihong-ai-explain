@@ -1,0 +1,15 @@
+// 可取消的生成进度通知（showCancellableProgress）：Notice 内嵌的「取消」按钮
+.nihong-ai-cancel-btn {
+	margin-left: 12px;
+	padding: 2px 12px;
+	font-size: var(--font-ui-small);
+	color: var(--text-on-accent);
+	background: var(--interactive-accent);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+
+	&:hover {
+		opacity: 0.85;
+	}
+}

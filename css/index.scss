@@ -1,0 +1,12 @@
+// 样式入口：按模块拆分，各模块 @use 引入。
+// 由 esbuild.config.mjs 编译为 styles.css（Obsidian 加载插件根目录的 styles.css）。
+
+@use "pill";
+@use "translate";
+@use "dictionary";
+@use "epub";
+@use "fileSuggest";
+@use "settings";
+@use "log";
+@use "tagHelp";
+@use "cancel";

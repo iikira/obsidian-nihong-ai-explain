@@ -1,0 +1,241 @@
+// 日志面板（LogPanelView）：tab 栏 + 日志列表（时间/级别/source/text）+ 翻译/朗读缓存条目
+.nihong-ai-log-view {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.nihong-ai-log-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nihong-ai-log-title {
+	font-weight: 600;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.nihong-ai-log-clear-btn {
+	appearance: none;
+	border: none;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+	padding: 2px 8px;
+	border-radius: 4px;
+
+	&:hover {
+		background: var(--background-modifier-hover);
+		color: var(--text-normal);
+	}
+}
+
+.nihong-ai-log-list {
+	flex: 1 1 auto;
+	overflow-y: auto;
+	overflow-wrap: anywhere;
+	padding: 4px 8px;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+.nihong-ai-log-line {
+	display: flex;
+	gap: 6px;
+	padding: 1px 2px;
+	white-space: pre-wrap;
+	border-radius: 2px;
+
+	&:hover {
+		background: var(--background-modifier-hover);
+	}
+}
+
+.nihong-ai-log-time {
+	flex: 0 0 auto;
+	color: var(--text-faint);
+}
+
+.nihong-ai-log-level {
+	flex: 0 0 auto;
+	font-weight: 700;
+}
+
+.nihong-ai-log-source {
+	flex: 0 0 10ch;
+	min-width: 10ch;
+	color: var(--text-muted);
+}
+
+.nihong-ai-log-text {
+	flex: 1 1 auto;
+	color: var(--text-normal);
+}
+
+// 级别着色
+.nihong-ai-log-level-info .nihong-ai-log-level {
+	color: var(--text-faint);
+}
+
+.nihong-ai-log-level-warn {
+	.nihong-ai-log-level {
+		color: var(--text-warning, #d29922);
+	}
+
+	.nihong-ai-log-text {
+		color: var(--text-warning, #d29922);
+	}
+}
+
+.nihong-ai-log-level-error {
+	.nihong-ai-log-level {
+		color: var(--text-error, #e05252);
+	}
+
+	.nihong-ai-log-text {
+		color: var(--text-error, #e05252);
+	}
+}
+
+// tab 栏
+.nihong-ai-log-tabbar {
+	display: flex;
+	gap: 2px;
+	padding: 4px 8px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nihong-ai-log-tab {
+	appearance: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 4px 10px;
+	cursor: pointer;
+	border-radius: 4px 4px 0 0;
+
+	&:hover {
+		background: var(--background-modifier-hover);
+		color: var(--text-normal);
+	}
+
+	&.is-active {
+		color: var(--text-normal);
+		border-bottom-color: var(--interactive-accent);
+		font-weight: 600;
+	}
+}
+
+.nihong-ai-log-panel {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+
+	> .nihong-ai-log-list {
+		flex: 1 1 auto;
+	}
+}
+
+// 缓存条目展示
+.nihong-ai-log-empty {
+	color: var(--text-faint);
+	padding: 16px 8px;
+	text-align: center;
+	font-style: italic;
+}
+
+.nihong-ai-log-cache-line {
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+
+	&:last-child {
+		border-bottom: none;
+	}
+}
+
+.nihong-ai-log-cache-head {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	margin-bottom: 2px;
+}
+
+.nihong-ai-log-cache-src {
+	font-weight: 600;
+	color: var(--text-normal);
+	word-break: break-word;
+}
+
+.nihong-ai-log-cache-tag {
+	font-size: 0.8em;
+	color: var(--text-muted);
+	flex: 0 0 auto;
+}
+
+.nihong-ai-log-cache-val {
+	color: var(--text-muted);
+	word-break: break-word;
+	white-space: pre-wrap;
+}
+
+// 朗读缓存行：可点击重播
+.nihong-ai-log-tts-line {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px;
+	cursor: pointer;
+
+	&:hover {
+		background: var(--background-modifier-hover);
+	}
+
+	// 命中翻译缓存时，译文独占一行（flex-basis 100% 换行），与翻译缓存视图一致
+	> .nihong-ai-log-cache-val {
+		flex: 1 0 100%;
+	}
+}
+
+.nihong-ai-log-tts-play {
+	flex: 0 0 auto;
+	color: var(--interactive-accent);
+	font-size: 1.1em;
+}
+
+.nihong-ai-log-tts-meta {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+// 翻译缓存命中朗读缓存时：行首 ▶ + head 同行排列，整行可点击播放
+.nihong-ai-log-tts-playable {
+	cursor: pointer;
+
+	&:hover {
+		background: var(--background-modifier-hover);
+	}
+
+	> .nihong-ai-log-tts-play {
+		float: left;
+		margin-right: 6px;
+		line-height: 1.6;
+	}
+
+	> .nihong-ai-log-cache-head {
+		overflow: hidden;
+	}
+}

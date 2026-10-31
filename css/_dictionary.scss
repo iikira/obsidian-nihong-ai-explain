@@ -1,0 +1,200 @@
+// 词典弹窗（DictionaryPopup）：词头振假名 + 声调 + 义项 + 例句 + tag + 结构化内容（quote/footnote/attribution 等）
+.nihong-ai-dict-popup {
+	position: absolute;
+	z-index: calc(var(--layer-popover, 50) + 2);
+	min-width: 240px;
+	max-width: 520px;
+	max-height: 60vh;
+	overflow-y: auto;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+	padding: 12px 14px;
+	font-family: var(--font-text, var(--font-interface));
+	font-size: var(--nihong-ai-dict-fs, 14px);
+	line-height: 1.6;
+	-webkit-user-select: text;
+	user-select: text;
+
+	&[data-state="error"] {
+		border-color: var(--text-error);
+	}
+
+	&[data-state="loading"] .nihong-ai-dict-body {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--text-muted);
+	}
+}
+
+.nihong-ai-dict-close {
+	position: absolute;
+	top: 4px;
+	right: 6px;
+	appearance: none;
+	border: none;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 1.3em;
+	line-height: 1;
+	cursor: pointer;
+	padding: 2px 6px;
+	border-radius: 4px;
+	z-index: 1;
+
+	&:hover {
+		background: var(--background-modifier-hover);
+		color: var(--text-normal);
+	}
+}
+
+.nihong-ai-dict-body {
+	margin-right: 16px;
+}
+
+.nihong-ai-dict-message {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.nihong-ai-dict-entry {
+	padding: 6px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+
+	&:last-child {
+		border-bottom: none;
+	}
+}
+
+.nihong-ai-dict-header {
+	font-size: 1.15em;
+	font-weight: 600;
+	margin-bottom: 4px;
+	color: var(--text-normal);
+}
+
+.nihong-ai-dict-furigana {
+	font-size: 1.15em;
+
+	rt {
+		font-size: 0.7em;
+		font-weight: normal;
+		color: var(--text-muted);
+		user-select: none;
+		-webkit-user-select: none;
+
+		// 让无 reading 的 base 不留空白 <rt>（视觉上更紧凑）
+		&:empty {
+			display: none;
+		}
+	}
+}
+
+.nihong-ai-dict-reason {
+	font-size: 0.85em;
+	font-weight: normal;
+	color: var(--text-muted);
+	margin-left: 4px;
+}
+
+.nihong-ai-dict-accent {
+	font-size: 0.85em;
+	font-weight: normal;
+	color: var(--text-muted);
+	margin-left: 6px;
+}
+
+.nihong-ai-dict-senses {
+	margin: 0;
+	padding-left: 20px;
+}
+
+// names dict（JMnedict）的读音表：无序号，去 ol 缩进
+.nihong-ai-dict-senses-names {
+	padding-left: 0;
+	list-style: none;
+}
+
+.nihong-ai-dict-sense {
+	margin: 4px 0;
+}
+
+.nihong-ai-dict-tags {
+	display: inline-flex;
+	gap: 2px;
+	margin-right: 6px;
+	vertical-align: top;
+}
+
+.nihong-ai-dict-tag {
+	display: inline-block;
+	padding: 0 4px;
+	font-size: 0.79em;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	border-radius: 3px;
+}
+
+.nihong-ai-dict-glossary {
+	display: inline;
+}
+
+// 结构化释义里的列表（glossary / sense-group / sense 共用列表样式）
+.nihong-ai-dict-glossary ul,
+.nihong-ai-dict-sense-group ul,
+.nihong-ai-dict-sense ul {
+	margin: 0;
+	padding-left: 16px;
+}
+
+.nihong-ai-dict-glossary li,
+.nihong-ai-dict-sense-group li,
+.nihong-ai-dict-sense li {
+	margin: 2px 0;
+}
+
+.nihong-ai-dict-sense-group,
+.nihong-ai-dict-sense,
+.nihong-ai-dict-glossary,
+.nihong-ai-dict-extra-info {
+	margin: 2px 0;
+}
+
+.nihong-ai-dict-attribution {
+	margin: 2px 0;
+	font-size: 0.79em;
+	color: var(--text-faint);
+
+	a {
+		color: var(--text-accent);
+	}
+}
+
+.nihong-ai-dict-quote {
+	margin: 4px 0;
+	padding: 4px 8px;
+	border-left: 2px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.nihong-ai-dict-footnote {
+	margin: 4px 0;
+	padding: 4px 8px;
+	font-size: 0.85em;
+	color: var(--text-muted);
+	border-top: 1px dashed var(--background-modifier-border);
+}
+
+.nihong-ai-dict-footnote-ref {
+	font-weight: 600;
+	margin-right: 4px;
+}
+
+.nihong-ai-dict-deinflection {
+	font-style: italic;
+	color: var(--text-muted);
+}

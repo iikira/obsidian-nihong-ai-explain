@@ -1,0 +1,37 @@
+// epub 视图（EpubView）：标题/作者/提示/转换按钮
+.nihong-ai-epub-view {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 48px 24px;
+	text-align: center;
+	font-family: var(--font-text, var(--font-interface));
+
+	.nihong-ai-epub-title {
+		margin: 0 0 8px;
+		color: var(--text-normal);
+	}
+
+	.nihong-ai-epub-author {
+		color: var(--text-muted);
+		margin-bottom: 24px;
+	}
+
+	.nihong-ai-epub-hint {
+		color: var(--text-muted);
+		margin-bottom: 24px;
+	}
+
+	.nihong-ai-epub-convert-btn {
+		padding: 8px 20px;
+		border-radius: 6px;
+		cursor: pointer;
+		background: var(--interactive-accent);
+		color: var(--text-on-accent);
+		border: none;
+		font-size: var(--font-ui-small);
+
+		&:hover {
+			opacity: 0.9;
+		}
+	}
+}

@@ -74,6 +74,8 @@ export class LRUTranslateCache {
 		this.map.delete(key);
 		this.map.set(key, v);
 		this.scheduleFlush();
+		// 命中缓存：LRU 顺序变化，通知缓存视图刷新
+		emitCacheChange("translate");
 		return v;
 	}
 

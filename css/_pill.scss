@@ -1,0 +1,33 @@
+// 选区浮动按钮（pill）：选中文字后弹出的 AI 讲解/语法拆解/翻译/查词典/朗读 按钮条
+.nihong-ai-pill {
+	position: absolute;
+	z-index: var(--layer-popover, 50);
+	display: inline-flex;
+	gap: 1px;
+	background: var(--background-secondary);
+	border-radius: 6px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	overflow: hidden;
+	user-select: none;
+}
+
+.nihong-ai-pill-btn {
+	appearance: none;
+	border: none;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	padding: 5px 12px;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: opacity 0.1s ease;
+
+	&:hover {
+		opacity: 0.85;
+	}
+
+	&:active {
+		transform: translateY(1px);
+	}
+}

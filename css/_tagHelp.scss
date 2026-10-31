@@ -1,0 +1,44 @@
+// 词典 tag 帮助弹窗（TagHelpModal）：Jitendex tag 中文解释表
+.nihong-ai-tag-help {
+	max-width: 640px;
+}
+
+.nihong-ai-tag-help-hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin: 0 0 12px;
+}
+
+.nihong-ai-tag-help-section {
+	margin-bottom: 16px;
+
+	h3 {
+		margin: 0 0 6px;
+		font-size: var(--font-ui-small);
+		color: var(--text-accent);
+	}
+}
+
+.nihong-ai-tag-help-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--font-ui-small);
+
+	th,
+	td {
+		text-align: left;
+		padding: 3px 10px;
+		border-bottom: 1px solid var(--background-modifier-border);
+	}
+
+	th {
+		color: var(--text-muted);
+		font-weight: 600;
+	}
+
+	td:first-child {
+		font-family: var(--font-monospace);
+		color: var(--text-normal);
+		width: 30%;
+	}
+}

@@ -1,0 +1,85 @@
+// 可折叠设置分区（<details>/<summary>，参考 lexis）：根容器 + 分区标题 + 三角箭头 + 分区体
+// 根容器：块级全宽，承载各分区垂直堆叠（脱离所在 setting-item 的 flex 布局）
+.nihong-ai-settings-root {
+	display: block;
+	width: 100%;
+}
+
+.nihong-ai-settings-section {
+	margin: 10px 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	min-width: 0;
+
+	> .nihong-ai-settings-section-heading {
+		display: grid;
+		grid-template-columns: 10px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
+		min-height: 44px;
+		padding: 4px 0;
+		margin: 0;
+		border: 0;
+		background: transparent;
+		box-shadow: none;
+		font-weight: 600;
+		font-size: var(--font-ui-small);
+		list-style: none;
+		padding-left: 10px;
+	}
+
+	// 隐藏浏览器默认 details 标记
+	> summary::-webkit-details-marker {
+		display: none;
+	}
+
+	> summary {
+		cursor: pointer;
+
+		// 三角箭头（旋转展开）
+		&::before {
+			content: "";
+			justify-self: center;
+			width: 0;
+			height: 0;
+			border-style: solid;
+			border-width: 0.275em 0 0.275em 0.45em;
+			border-color: transparent transparent transparent var(--text-faint);
+			transform: rotate(0deg);
+			transform-origin: 50% 50%;
+			transition: transform 120ms ease;
+		}
+	}
+
+	// 展开时箭头旋转 90°
+	&[open] > summary::before {
+		transform: rotate(90deg);
+	}
+}
+
+.nihong-ai-settings-section-label {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: 2px;
+}
+
+.nihong-ai-settings-section-title {
+	color: var(--text-accent);
+	font-size: 1.07em;
+}
+
+.nihong-ai-settings-section-hint {
+	font-weight: 400;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.nihong-ai-settings-section-body {
+	display: block;
+	border-top: 1px solid var(--background-modifier-border);
+
+	> .setting-item:first-child {
+		border-top: none;
+	}
+}
