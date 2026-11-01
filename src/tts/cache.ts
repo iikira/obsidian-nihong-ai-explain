@@ -29,8 +29,8 @@ export interface TTSCacheStorage {
 	close?(): Promise<void>;
 }
 
-/** TTS 缓存容量（条数，与原纯内存版一致） */
-const TTS_CACHE_SIZE = 128;
+/** TTS 缓存容量（条数） */
+export const TTS_CACHE_SIZE = 1024;
 
 /** 按引擎推断音频 MIME：windows=audio/wav（PCM），其余（google）=audio/mpeg。
  *  缓存键建 blobUrl 与持久层重建 blobUrl 都用此推断，集中一处避免加引擎时改两处。 */
@@ -48,6 +48,10 @@ export function mimeForEngine(engine: string): string {
 export class PersistentTTSCache {
 	/** 内存：key → blobUrl（播放用） */
 	private blobUrls = new Map<string, string>();
+	/** key → 字节大小（byteLength），用于同步统计 totalBytes（内存层不存 buffer 本身） */
+	private keyBytes = new Map<string, number>();
+	/** 当前总占用字节（set/淘汰/clear/load 同步更新；get 仅提升 LRU 不变） */
+	private totalBytesCount = 0;
 	/** 字节持久层（可注入，生产 IndexedDB / 测试内存） */
 	private storage: TTSCacheStorage | null = null;
 	/** 是否已从持久层加载完毕 */
@@ -97,8 +101,11 @@ export class PersistentTTSCache {
 		for (const key of keep) {
 			// 从 key（engine::voice::text）前缀推断引擎，再推断 mime
 			const engine = key.slice(0, key.indexOf("::"));
-			const url = URL.createObjectURL(new Blob([bufByKey.get(key)!], { type: mimeForEngine(engine) }));
+			const buf = bufByKey.get(key)!;
+			const url = URL.createObjectURL(new Blob([buf], { type: mimeForEngine(engine) }));
 			this.blobUrls.set(key, url);
+			this.keyBytes.set(key, buf.byteLength);
+			this.totalBytesCount += buf.byteLength;
 		}
 		// 淘汰超容量或 order 里多余的旧条目（持久层 audio + order 都清）
 		const keepSet = new Set(keep);
@@ -141,13 +148,16 @@ export class PersistentTTSCache {
 	 */
 	async set(key: string, buffer: ArrayBuffer, mime?: string): Promise<string> {
 		const url = URL.createObjectURL(new Blob([buffer], mime ? { type: mime } : undefined));
-		// 覆盖旧条目：先 revoke 旧 blobUrl
+		// 覆盖旧条目：先 revoke 旧 blobUrl，并从 totalBytes 扣除旧字节
 		if (this.blobUrls.has(key)) {
 			const oldUrl = this.blobUrls.get(key)!;
 			this.blobUrls.delete(key);
 			URL.revokeObjectURL(oldUrl);
+			this.totalBytesCount -= this.keyBytes.get(key) ?? 0;
 		}
 		this.blobUrls.set(key, url);
+		this.keyBytes.set(key, buffer.byteLength);
+		this.totalBytesCount += buffer.byteLength;
 		// 持久层写入：fire-and-forget，绝不 await——IndexedDB 在 Obsidian 热重载下可能被
 		// 旧连接阻塞而永久挂起，await 会导致播放永久卡死。内存层已建好 blobUrl，播放不依赖持久层。
 		// 持久化失败/挂起只影响「重启后缓存是否保留」，不影响本次播放。
@@ -167,6 +177,8 @@ export class PersistentTTSCache {
 				URL.revokeObjectURL(oldUrl);
 			}
 			this.blobUrls.delete(oldestKey);
+			this.totalBytesCount -= this.keyBytes.get(oldestKey) ?? 0;
+			this.keyBytes.delete(oldestKey);
 			if (this.storage) {
 				void this.storage.delete(oldestKey).catch(() => {
 					// noop
@@ -183,6 +195,8 @@ export class PersistentTTSCache {
 			URL.revokeObjectURL(url);
 		}
 		this.blobUrls.clear();
+		this.keyBytes.clear();
+		this.totalBytesCount = 0;
 		if (this.storage) {
 			try {
 				await this.storage.clear();
@@ -206,6 +220,11 @@ export class PersistentTTSCache {
 	/** 当前条目数 */
 	size(): number {
 		return this.blobUrls.size;
+	}
+
+	/** 当前总占用字节（同步，set/淘汰/clear/load 时维护） */
+	totalBytes(): number {
+		return this.totalBytesCount;
 	}
 
 	/** 返回所有条目（key → blobUrl），按 LRU 逆序（最近使用在前） */

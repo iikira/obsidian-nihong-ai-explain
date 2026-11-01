@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
 	PersistentTTSCache,
 	MemoryTTSCacheStorage,
+	TTS_CACHE_SIZE,
 	type TTSCacheStorage,
 } from "../src/tts/cache.ts";
 
@@ -52,14 +53,16 @@ test("持久化 + 重启重建：set → clear 内存 → load 恢复命中", as
 });
 
 test("LRU：get 提升 key 到最近使用，超容量淘汰最旧（两层同步）", async () => {
-	// 容量 128，构造 130 条，验证第 1、2 条被淘汰（持久层也删）
+	// 超容量 2 条，验证最旧 2 条被淘汰（持久层也删）
+	const overflow = 2;
+	const total = TTS_CACHE_SIZE + overflow;
 	const keys: string[] = [];
-	for (let i = 0; i < 130; i++) {
+	for (let i = 0; i < total; i++) {
 		const k = `k${i}`;
 		await cache.set(k, new ArrayBuffer(4));
 		keys.push(k);
 	}
-	assert.equal(cache.size(), 128);
+	assert.equal(cache.size(), TTS_CACHE_SIZE);
 	// 最旧 k0、k1 应被淘汰
 	assert.equal(cache.get("k0"), null);
 	assert.equal(cache.get("k1"), null);
@@ -88,14 +91,14 @@ test("clear：内存清空 + 持久层清空", async () => {
 });
 
 test("get 命中后 LRU 提升：再 set 到容量边界时该 key 不被淘汰", async () => {
-	// 填满 128 条
-	for (let i = 0; i < 128; i++) {
+	// 填满容量
+	for (let i = 0; i < TTS_CACHE_SIZE; i++) {
 		await cache.set(`k${i}`, new ArrayBuffer(4));
 	}
 	// 访问 k0（最旧）提升为最近使用
 	cache.get("k0");
 	// 再加一条触发淘汰
-	await cache.set("k128", new ArrayBuffer(4));
+	await cache.set(`k${TTS_CACHE_SIZE}`, new ArrayBuffer(4));
 	// k0 因被访问过应保留，k1（新最旧）应被淘汰
 	assert.ok(cache.get("k0"));
 	assert.equal(cache.get("k1"), null);
@@ -176,19 +179,20 @@ test("clear 后持久层 order 也清空", async () => {
 });
 
 test("load 后超容量淘汰：order 中超出部分从持久层删除 + order 截断", async () => {
-	// 构造 130 条 + order
-	for (let i = 0; i < 130; i++) {
+	// 构造 容量+2 条 + order
+	const total = TTS_CACHE_SIZE + 2;
+	for (let i = 0; i < total; i++) {
 		await cache.set(`k${i}`, new ArrayBuffer(4));
 	}
-	// order 应是 k129,...,k2（128 条），k0、k1 已被淘汰（内存 + 持久层）
+	// order 应是 k(total-1),...,k2（容量条），k0、k1 已被淘汰（内存 + 持久层）
 	const orderLen = (await storage.getOrder()).length;
-	assert.equal(orderLen, 128);
+	assert.equal(orderLen, TTS_CACHE_SIZE);
 	assert.equal(storage.store.has("k0"), false);
 	// 模拟重启，验证顺序与原 cache 一致
 	const cache2 = new PersistentTTSCache();
 	cache2.setStorage(storage);
 	await cache2.load();
-	assert.equal(cache2.size(), 128);
+	assert.equal(cache2.size(), TTS_CACHE_SIZE);
 	const order2 = cache2.entries().map((e) => e.key);
 	const order1 = cache.entries().map((e) => e.key);
 	assert.deepEqual(order2, order1);
@@ -282,12 +286,12 @@ test("set 淘汰时持久层删除 fire-and-forget：内存层立即清，持久
 		});
 	const c = new PersistentTTSCache();
 	c.setStorage(hs);
-	// 填满 128 条
-	for (let i = 0; i < 128; i++) {
+	// 填满容量
+	for (let i = 0; i < TTS_CACHE_SIZE; i++) {
 		await c.set(`k${i}`, new ArrayBuffer(4));
 	}
-	// 加第 129 条触发淘汰 k0
-	await c.set("k128", new ArrayBuffer(4));
+	// 加第 容量+1 条触发淘汰 k0
+	await c.set(`k${TTS_CACHE_SIZE}`, new ArrayBuffer(4));
 	// 内存层 k0 应已立即淘汰
 	assert.equal(c.get("k0"), null);
 	assert.ok(c.get("k128")); // 新条目在

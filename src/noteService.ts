@@ -7,7 +7,7 @@ import {
 } from "./shared";
 import { ensureFolder, hasForbiddenFileNameChar, resolveTargetPath } from "./utils";
 import type { ModelGroup } from "./settings";
-import { logError, errMsg } from "./log";
+import { logError, logInfo, errMsg } from "./log";
 import { CancelledError, showCancellableProgress, throwIfCancelled } from "./cancel";
 
 /**
@@ -125,7 +125,7 @@ export abstract class BaseNoteService<C extends NoteServiceConfig> {
 				return;
 			}
 
-			const { notice, token } = showCancellableProgress(actionId);
+			const { notice, token } = showCancellableProgress(actionId, actionName);
 			const group = this.opts.getModelGroup();
 
 			// 构造 user 内容（子类实现：explain 注入词典参考，grammar 直接用原文）
@@ -138,6 +138,8 @@ export abstract class BaseNoteService<C extends NoteServiceConfig> {
 				{ role: "system", content: systemPrompt },
 				{ role: "user", content: userContent.content },
 			];
+
+			logInfo(logSource, `用户提示词:\n${userContent.content}`);
 
 			let content = "";
 			const logger = new CallLogger("llm");

@@ -25,16 +25,19 @@ export function createCancelToken(): CancelToken {
  * 可取消的「正在生成…」进度通知：通知内嵌一个「取消」按钮，点击后置标志位并隐藏通知。
  * 返回 [notice, token]——notice 用于生成完成后手动 hide，token 供各 await 点检查。
  *
+ * Notice 5 秒后自动消失（5 秒取消窗口）；消失后用户失去取消入口，生成继续跑完。
+ *
  * @param taskLabel 任务名（如 "explain" / "grammar"，即日志 source），仅作日志用
+ * @param displayName 显示名（如 "AI 讲解" / "语法拆解"），进 Notice 文案以区分任务
  */
-export function showCancellableProgress(taskLabel: string): {
+export function showCancellableProgress(taskLabel: string, displayName: string): {
 	notice: Notice;
 	token: CancelToken;
 } {
 	const token = createCancelToken();
 	// createFragment 是 Obsidian 全局函数（与 sleep 同属 obsidian.d.ts 的全局）
 	const fragment = createFragment((f: DocumentFragment) => {
-		f.createSpan({ text: "正在生成…" });
+		f.createSpan({ text: `正在生成${displayName}…` });
 		const btn = f.createEl("button", {
 			text: "取消",
 			cls: "nihong-ai-cancel-btn",
@@ -45,7 +48,8 @@ export function showCancellableProgress(taskLabel: string): {
 			logInfo(taskLabel, "用户已取消生成");
 		});
 	});
-	const notice = new Notice(fragment, 0);
+	// 5000ms 后自动消失：5 秒取消窗口，过后用户失去取消入口但生成仍正常完成
+	const notice = new Notice(fragment, 5000);
 	return { notice, token };
 }
 

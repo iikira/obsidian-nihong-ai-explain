@@ -49,6 +49,10 @@ export interface NihongAIExplainSettings {
 	ttsGoogleDomain: string;
 	/** 禁用 Lexis 选区悬浮窗（开启后改用本插件自带 pill） */
 	disableLexisPill: boolean;
+	/** 移动端悬浮窗固定在底部居中（true=固定，false=跟随选区）；仅移动端生效 */
+	mobileFixedPill: boolean;
+	/** 移动端悬浮窗固定时距底端的距离（px）；仅移动端、mobileFixedPill=true 时生效 */
+	mobileFixedPillBottom: number;
 }
 
 
@@ -78,4 +82,6 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	ttsWindowsVoice: "",
 	ttsGoogleDomain: "",
 	disableLexisPill: false,
+	mobileFixedPill: true,
+	mobileFixedPillBottom: 100,
 };

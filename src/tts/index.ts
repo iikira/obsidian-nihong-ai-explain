@@ -162,6 +162,11 @@ export function getTTSCacheSize(): number {
 	return ttsCache.size();
 }
 
+/** TTS 缓存当前总占用字节（set/淘汰/clear/load 时同步维护；供设置页显示 MB） */
+export function getTTSCacheTotalBytes(): number {
+	return ttsCache.totalBytes();
+}
+
 /** TTS 缓存条目（供日志面板「朗读缓存」tab 展示 + 点击重播） */
 export interface TTSCacheEntry {
 	/** 原文 */

@@ -685,8 +685,6 @@ export class DictionaryManager {
 	}
 
 	async processZipFiles(db: IDBPDatabase<YomitanDB>, files: Record<string, Uint8Array>): Promise<void> {
-		new Notice("正在导入词典…", 3000);
-
 		// 1. index.json（仅解析，暂不写入 dictionaries store）
 		//    重要：版本号（meta.revision）必须等所有词条 + tag 都导入成功后才写入，
 		//    防止导入中途程序退出后，dictionaries 已记新版本号但词条不完整，
@@ -704,6 +702,8 @@ export class DictionaryManager {
 		if (!meta || !meta.title) {
 			throw new Error("zip 缺少有效的 index.json");
 		}
+		// 解析到 title 后提示正在导入哪本词典（Jitendex + JMnedict 串行导入时区分）
+		new Notice(`正在导入 ${meta.title}…`, 3000);
 
 		// 2. term_bank_*.json（先导入所有词条）
 		const termKeys = Object.keys(files)
@@ -783,7 +783,7 @@ export class DictionaryManager {
 		}
 		await db.put("dictionaries", meta);
 
-		new Notice(`词典导入完成: ${totalTerms} 条`, 5000);
+		new Notice(`${meta.title} 导入完成: ${totalTerms} 条`, 5000);
 	}
 
 	private isValidDeinflection(

@@ -114,6 +114,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		this.pill = new SelectionPill(this.buildPillActions());
 		this.pill.attach();
 		this.applyLexisPillDisabled();
+		this.applyMobileFixedPill();
 
 		this.registerEvent(
 			this.app.workspace.on("editor-menu", (menu, editor) => {
@@ -383,6 +384,11 @@ export default class NihongAIExplainPlugin extends Plugin {
 	/** 应用「禁用 Lexis 悬浮窗」开关到当前 pill */
 	applyLexisPillDisabled(): void {
 		this.pill?.setDisabledLexis(this.settings.disableLexisPill);
+	}
+
+	/** 应用「移动端悬浮窗固定底部」开关 + 距底端距离到当前 pill（仅移动端生效） */
+	applyMobileFixedPill(): void {
+		this.pill?.setMobileFixed(this.settings.mobileFixedPill, this.settings.mobileFixedPillBottom);
 	}
 
 	/** 进行中任务集合：key = `${actionId}::${text}`，防止同 action+同 text 重复触发 */

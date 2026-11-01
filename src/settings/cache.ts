@@ -1,10 +1,13 @@
 import { Notice, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
-import { clearTTSCache, getTTSCacheSize } from "../tts";
+import { clearTTSCache, getTTSCacheSize, getTTSCacheTotalBytes } from "../tts";
 
-/** 更新「TTS 缓存」行的描述条数 */
-const ttsDesc = (n: number): string =>
-	`LRU 缓存 TTS 音频，容量 128 条。当前 ${n} 条。`;
+/** 把字节数格式化为 MB（保留两位小数） */
+const formatMB = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+
+/** 更新「TTS 缓存」行的描述：条数 + 占用空间 */
+const ttsDesc = (n: number, bytes: number): string =>
+	`LRU 缓存 TTS 音频，容量 1024 条。当前 ${n} 条，占用 ${formatMB(bytes)}。`;
 
 /** 更新「翻译缓存」行的描述条数 */
 const translateDesc = (n: number): string =>
@@ -14,7 +17,7 @@ const translateDesc = (n: number): string =>
 export function renderCacheSection(ctx: SettingsContext, body: HTMLElement): void {
 	const ttsSetting = new Setting(body)
 		.setName("TTS 缓存")
-		.setDesc(ttsDesc(getTTSCacheSize()))
+		.setDesc(ttsDesc(getTTSCacheSize(), getTTSCacheTotalBytes()))
 		.addButton((btn) =>
 			btn
 				.setButtonText("清空缓存")
@@ -22,8 +25,8 @@ export function renderCacheSection(ctx: SettingsContext, body: HTMLElement): voi
 				.onClick(() => {
 					void clearTTSCache().then(() => {
 						new Notice("TTS 缓存已清空");
-						// 只更新本行描述条数，不重渲染整个设置树（避免焦点重置到首个输入框触发下拉）
-						ttsSetting.setDesc(ttsDesc(getTTSCacheSize()));
+						// 只更新本行描述条数 + 占用，不重渲染整个设置树（避免焦点重置到首个输入框触发下拉）
+						ttsSetting.setDesc(ttsDesc(getTTSCacheSize(), getTTSCacheTotalBytes()));
 					});
 				}),
 		);

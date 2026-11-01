@@ -58,6 +58,10 @@ export class SelectionPill {
 	private currentSelection = "";
 	/** 禁用 Lexis 悬浮窗（开关打开后 true）：不注入 Lexis pill，强制走自家 fallback */
 	private disabledLexis = false;
+	/** 移动端悬浮窗是否固定在底部居中（true=固定，false=跟随选区）；仅移动端生效 */
+	private mobileFixed = true;
+	/** 移动端悬浮窗固定时距底端的距离（px） */
+	private mobileFixedBottom = 100;
 
 	private boundMouseUp: (e: MouseEvent) => void;
 	private boundScroll: (e: Event) => void;
@@ -119,6 +123,13 @@ export class SelectionPill {
 			// 恢复注入：对当前已显示的 Lexis pill 重新注入
 			this.refreshVisiblePill();
 		}
+	}
+
+	/** 设置移动端悬浮窗固定模式 + 距底端距离；立即重定位已显示的 pill */
+	setMobileFixed(fixed: boolean, bottom: number): void {
+		this.mobileFixed = fixed;
+		this.mobileFixedBottom = bottom;
+		this.refreshVisiblePill();
 	}
 
 	private refreshVisiblePill(): void {
@@ -316,14 +327,11 @@ export class SelectionPill {
 		this.repositionPill(lePill);
 	}
 
-	/** 移动端固定位置：距底端 100px 居中显示 */
-	private static readonly MOBILE_FIXED_BOTTOM = 100;
-
-	/** 移动端把 pill 固定显示在距底端 100px、水平居中的位置 */
+	/** 移动端把 pill 固定显示在距底端（mobileFixedBottom）px、水平居中的位置 */
 	private positionFixedCenter(pill: HTMLElement): void {
 		pill.setCssStyles({
 			top: "",
-			bottom: `${SelectionPill.MOBILE_FIXED_BOTTOM}px`,
+			bottom: `${this.mobileFixedBottom}px`,
 			left: "50%",
 			transform: "translateX(-50%)",
 		});
@@ -332,8 +340,8 @@ export class SelectionPill {
 	/** 重新定位 pill，确保不出视口；选区底部空间不足时弹到选区上方 */
 	private repositionPill(pill: Element): void {
 		const el = pill as HTMLElement;
-		// 移动端：固定位置显示（距底端 100px 居中），不跟随选区
-		if (Platform.isMobileApp) {
+		// 移动端：固定位置显示（距底端 mobileFixedBottom px 居中），不跟随选区
+		if (Platform.isMobileApp && this.mobileFixed) {
 			this.positionFixedCenter(el);
 			return;
 		}
@@ -421,8 +429,8 @@ export class SelectionPill {
 		}
 		this.ensureFallbackEl();
 		const el = this.fallbackEl!;
-		// 移动端：固定位置（距底端 100px 居中），不跟随选区
-		if (Platform.isMobileApp) {
+		// 移动端：固定位置（距底端 mobileFixedBottom px 居中），不跟随选区
+		if (Platform.isMobileApp && this.mobileFixed) {
 			this.positionFixedCenter(el);
 			el.setCssStyles({ display: "inline-flex" });
 			return;

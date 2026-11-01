@@ -12,6 +12,9 @@
 	padding: 12px 14px 12px 14px;
 	font-size: 14px;
 	line-height: 1.6;
+	// 允许鼠标选中复制译文（Obsidian 某些主题默认禁用文本选择）
+	-webkit-user-select: text;
+	user-select: text;
 
 	&[data-state="error"] {
 		border-color: var(--text-error);
@@ -39,7 +42,7 @@
 }
 
 .nihong-ai-translate-body {
-	margin-right: 16px;
+	margin-right: 32px; // 避让右上角关闭按钮（移动端卡片窄时首行右端不被遮）
 	word-break: break-word;
 	white-space: pre-wrap;
 }
