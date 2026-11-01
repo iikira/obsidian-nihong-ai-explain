@@ -46,7 +46,8 @@ export class GrammarService extends BaseNoteService<GrammarConfig> {
 	}
 
 	protected async buildUserContent(clean: string): Promise<NoteUserContent> {
-		// 语法拆解无词典参考注入，直接用原文作 user 内容
-		return { content: clean };
+		// 语法拆解无词典参考注入。显式标注拆解对象，避免模型在孤立短输入下退回到
+		// 抓 system prompt 示例句来拆解（曾对单字「以上」生成模板示例句的完整拆解）。
+		return { content: `请对以下日语进行语法拆解：\n\n${clean}` };
 	}
 }

@@ -57,7 +57,8 @@ export default class NihongAIExplainPlugin extends Plugin {
 			googleDomain: this.settings.ttsGoogleDomain,
 		});
 		// 初始化 TTS 持久化缓存：从 IndexedDB 加载字节、重建 blobUrl（加载前缓存空）
-		void initTTSCache();
+		// 库名按 vault 隔离：所有 vault 共享同一 origin，需在库名层面区分
+		void initTTSCache(this.app.vault.getName());
 		this.addSettingTab(new NihongAIExplainSettingTab(this.app, this));
 
 		this.translateService = new TranslateService({

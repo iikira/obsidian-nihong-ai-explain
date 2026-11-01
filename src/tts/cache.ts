@@ -259,15 +259,39 @@ export class MemoryTTSCacheStorage implements TTSCacheStorage {
 	}
 }
 
-/** IndexedDB TTS 缓存数据库名与版本。
+/** IndexedDB TTS 缓存数据库名前缀与版本。
  *  注意：曾用名 "nihong-ai-tts-cache"（v1→v2 升级在部分环境卡死，indexedDB.open 永不触发任何事件，
  *  DB 永久损坏无法打开）。改用全新库名 "nihong-ai-tts-cache-v2"，旧库自然废弃（仅占少量磁盘，无副作用）。
- *  v2：store audio（key→ArrayBuffer）+ 保留键 __lru_order__ → string[] 存 LRU 顺序。 */
+ *  v2：store audio（key→ArrayBuffer）+ 保留键 __lru_order__ → string[] 存 LRU 顺序。
+ *  库名按 vault 隔离：{@link ttsCacheDbName} 把 vault 名拼进库名，使多 vault 的 TTS 缓存互不干扰
+ *  （Obsidian 桌面端所有 vault 共享同一 origin，IndexedDB 按 origin 隔离，故需库名层面区分 vault）。 */
 const TTS_DB_NAME = "nihong-ai-tts-cache-v2";
 const TTS_DB_VERSION = 1;
 const TTS_STORE = "audio";
 /** LRU 顺序存在 audio store 里的保留键（值=string[]）。getAll/put/delete 须跳过此键，不当音频数据 */
 const TTS_ORDER_KEY = "__lru_order__";
+
+/** 库名里需清洗的非法/危险字符（文件名非法字符 + 控制字符），统一替换为 `_`。
+ *  控制字符匹配是防御性清洗（vault 名理论上不含，但 getName() 不保证）。 */
+// eslint-disable-next-line no-control-regex -- vault 名可能含控制字符，需清洗为 _ 以保证库名安全
+const TTS_DB_NAME_FORBIDDEN = /[\\/:*?"<>|\x00-\x1f]/g;
+/** 连续空白折叠为单个 `_` */
+const TTS_DB_NAME_WHITESPACE = /\s+/g;
+
+/**
+ * 按 vault 名生成 TTS 缓存 IndexedDB 库名：`nihong-ai-tts-cache-v2-<vault名>`。
+ * vault 名清洗：文件名非法字符 + 控制字符 → `_`，连续空白折叠为单个 `_`，两端 trim。
+ * 清洗后为空（vault 名全为非法字符/空白 / 空串）则回退默认 {@link TTS_DB_NAME}，保证极端情况仍能打开。
+ * IndexedDB 库名技术上允许几乎任何字符串，清洗仅为稳妥可读。
+ * @param vaultName 来自 `app.vault.getName()`，用户创建 vault 时的命名，跨重启稳定。
+ */
+export function ttsCacheDbName(vaultName: string): string {
+	const cleaned = vaultName
+		.trim()
+		.replace(TTS_DB_NAME_FORBIDDEN, "_")
+		.replace(TTS_DB_NAME_WHITESPACE, "_");
+	return cleaned ? `${TTS_DB_NAME}-${cleaned}` : TTS_DB_NAME;
+}
 
 /**
  * 原生 IndexedDB 版 TTSCacheStorage：store `audio`（key→ArrayBuffer 音频字节，
@@ -280,8 +304,12 @@ const TTS_ORDER_KEY = "__lru_order__";
 export class IndexedDBTTSCacheStorage implements TTSCacheStorage {
 	private dbPromise: Promise<IDBDatabase>;
 
-	constructor() {
-		this.dbPromise = openDBNative();
+	/**
+	 * @param dbName 库名；默认 {@link TTS_DB_NAME}（无 vault 隔离）。生产环境用
+	 *  {@link ttsCacheDbName} 生成按 vault 隔离的库名，测试可不传用默认名。
+	 */
+	constructor(dbName: string = TTS_DB_NAME) {
+		this.dbPromise = openDBNative(dbName);
 	}
 
 	private async db(): Promise<IDBDatabase> {
@@ -337,9 +365,9 @@ export class IndexedDBTTSCacheStorage implements TTSCacheStorage {
  * 会永久挂起且无日志（曾导致「重启后缓存消失」+「朗读卡死」）。原生 API 显式处理 success/blocked/error，
  * blocked 时 reject 而非挂起。upgrade 幂等（缺 store 才建）。onunload 调 close() 释放连接防热重载阻塞。
  */
-function openDBNative(): Promise<IDBDatabase> {
+function openDBNative(dbName: string): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
-		const req = indexedDB.open(TTS_DB_NAME, TTS_DB_VERSION);
+		const req = indexedDB.open(dbName, TTS_DB_VERSION);
 		req.onupgradeneeded = () => {
 			const db = req.result;
 			if (!db.objectStoreNames.contains(TTS_STORE)) {

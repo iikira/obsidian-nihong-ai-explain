@@ -1,7 +1,7 @@
 import { Notice, requestUrl } from "obsidian";
 import { logInfo, logError, errMsg } from "../log";
 import { emitCacheChange } from "../cacheEvents";
-import { PersistentTTSCache, IndexedDBTTSCacheStorage, mimeForEngine } from "./cache";
+import { PersistentTTSCache, IndexedDBTTSCacheStorage, mimeForEngine, ttsCacheDbName } from "./cache";
 import {
 	synthesizeWindows,
 	isWindowsTTSAvailable,
@@ -141,9 +141,13 @@ export function setTTSConfig(cfg: TtsConfig): void {
 /**
  * 初始化 TTS 持久化缓存：注入 IndexedDB 适配器并从持久层加载重建 blobUrl。
  * 由 main.ts onload 调用。加载前 getCache 命中 null（调用方重新合成），加载后命中持久层。
+ * @param vaultName 当前 vault 名（来自 `app.vault.getName()`），用于生成按 vault 隔离的库名，
+ *  使多 vault 的 TTS 缓存互不干扰（Obsidian 桌面端所有 vault 共享同一 origin，IndexedDB 按 origin 隔离）。
+ *  不传则用默认库名（无 vault 隔离，仅测试/未传时回退）。
  */
-export async function initTTSCache(): Promise<void> {
-	ttsCache.setStorage(new IndexedDBTTSCacheStorage());
+export async function initTTSCache(vaultName?: string): Promise<void> {
+	const dbName = vaultName ? ttsCacheDbName(vaultName) : undefined;
+	ttsCache.setStorage(new IndexedDBTTSCacheStorage(dbName));
 	await ttsCache.load();
 }
 
