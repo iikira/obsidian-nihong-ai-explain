@@ -99,6 +99,26 @@ for (const file of testFiles) {
 		plugins: [stubPlugin],
 		// Node 内置模块保持 external，避免 esbuild 去掉 node: 前缀导致 require("test") 找不到
 		external: ["node:*"],
+		// 注入 DOMParser/Node 常量供 htmlToMd/ruby 的 DOM 解析器使用（linkedom）
+		// linkedom 的 DOMParser 对 text/html 不会自动包裹 <html><body>（与浏览器不同），
+		// 故包装一层：text/html 时把片段手动包进 body，模拟浏览器行为。
+		banner: {
+			js: [
+				`const { parseHTML } = require('linkedom');`,
+				`const _Node = parseHTML('<!DOCTYPE html>').window.Node;`,
+				`globalThis.Node = _Node;`,
+				`globalThis.DOMParser = class DOMParser {`,
+				`  parseFromString(html, type) {`,
+				`    if (type === 'text/html') {`,
+				`      const { document } = parseHTML('<!DOCTYPE html><html><head></head><body>' + html + '</body></html>');`,
+				`      return document;`,
+				`    }`,
+				`    const { document } = parseHTML(html);`,
+				`    return document;`,
+				`  }`,
+				`};`,
+			].join("\n"),
+		},
 	});
 	console.log(`[test] 编译 ${file} -> ${out}`);
 }

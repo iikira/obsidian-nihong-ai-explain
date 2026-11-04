@@ -6,22 +6,15 @@ import {
 	extractUsage,
 } from "../src/shared.ts";
 
-test("buildDisableThinking：deepseek-v4 用 DeepSeek 风格", () => {
-	assert.deepEqual(buildDisableThinking("deepseek-v4"), {
-		thinking: { type: "disabled" },
-	});
-	assert.deepEqual(buildDisableThinking("my-deepseek-v4-pro"), {
-		thinking: { type: "disabled" },
-	});
-});
-
-test("buildDisableThinking：其他模型用 OpenAI 风格", () => {
-	assert.deepEqual(buildDisableThinking("hy3-free"), {
+test("buildDisableThinking：三种风格一起发（兼容只认其一的网关）", () => {
+	const expect = {
 		reasoning_effort: "none",
-	});
-	assert.deepEqual(buildDisableThinking("gpt-4o"), {
-		reasoning_effort: "none",
-	});
+		thinking: { type: "disabled" },
+		chat_template_kwargs: { enable_thinking: false },
+	};
+	assert.deepEqual(buildDisableThinking("deepseek-v4"), expect);
+	assert.deepEqual(buildDisableThinking("hy3-free"), expect);
+	assert.deepEqual(buildDisableThinking("gpt-4o"), expect);
 });
 
 test("CallLogger：无 attempts 只输出 token 段", () => {
@@ -31,11 +24,12 @@ test("CallLogger：无 attempts 只输出 token 段", () => {
 		prompt_tokens: 100,
 		completion_tokens: 50,
 		reasoning_tokens: 0,
+		reasoning_chars: 0,
 		cached_tokens: 0,
 	});
 	logger.flush();
 	assert.equal(logs.length, 1);
-	assert.match(logs[0], /^token: 输入=100 输出=50 思考=0 缓存命中=0$/);
+	assert.match(logs[0], /^token: 输入=100 输出=50 思考=0 思考字数=0 缓存命中=0$/);
 });
 
 test("CallLogger：缓存命中 > 0 显示百分比", () => {
@@ -45,6 +39,7 @@ test("CallLogger：缓存命中 > 0 显示百分比", () => {
 		prompt_tokens: 200,
 		completion_tokens: 10,
 		reasoning_tokens: 0,
+		reasoning_chars: 0,
 		cached_tokens: 100,
 	});
 	logger.recordAttempt({ ok: true, ms: 1500 });
@@ -61,6 +56,7 @@ test("CallLogger：失败终态与失败计数", () => {
 		prompt_tokens: 0,
 		completion_tokens: 0,
 		reasoning_tokens: 0,
+		reasoning_chars: 0,
 		cached_tokens: 0,
 	});
 	logger.recordAttempt({ ok: false, ms: 100 });
@@ -91,6 +87,7 @@ test("extractUsage：OpenAI 风格（prompt_tokens_details.cached_tokens）", ()
 			prompt_tokens: 200,
 			completion_tokens: 10,
 			reasoning_tokens: 5,
+			reasoning_chars: 0,
 			cached_tokens: 100,
 		},
 	);
@@ -109,6 +106,7 @@ test("extractUsage：DeepSeek 风格（prompt_cache_hit_tokens）", () => {
 			prompt_tokens: 500,
 			completion_tokens: 20,
 			reasoning_tokens: 0,
+			reasoning_chars: 0,
 			cached_tokens: 300,
 		},
 	);
@@ -126,6 +124,7 @@ test("extractUsage：缺 prompt_tokens 时用 total - completion 兜底", () => 
 			prompt_tokens: 78, // 100 - 22
 			completion_tokens: 22,
 			reasoning_tokens: 0,
+			reasoning_chars: 0,
 			cached_tokens: 0,
 		},
 	);
@@ -141,6 +140,7 @@ test("extractUsage：total == completion 时 prompt 兜底为 0", () => {
 			prompt_tokens: 0,
 			completion_tokens: 22,
 			reasoning_tokens: 0,
+			reasoning_chars: 0,
 			cached_tokens: 0,
 		},
 	);
@@ -155,6 +155,55 @@ test("extractUsage：input_tokens/output_tokens 别名兼容", () => {
 			prompt_tokens: 50,
 			completion_tokens: 8,
 			reasoning_tokens: 0,
+			reasoning_chars: 0,
+			cached_tokens: 0,
+		},
+	);
+});
+
+test("extractUsage：reasoning_content 统计思考字数", () => {
+	assert.deepEqual(
+		extractUsage({
+			choices: [{ message: { reasoning_content: "长思考" } }],
+			usage: { prompt_tokens: 10, completion_tokens: 5 },
+		}),
+		{
+			prompt_tokens: 10,
+			completion_tokens: 5,
+			reasoning_tokens: 0,
+			reasoning_chars: 3,
+			cached_tokens: 0,
+		},
+	);
+});
+
+test("extractUsage：reasoning 兜底统计思考字数", () => {
+	assert.deepEqual(
+		extractUsage({
+			choices: [{ message: { reasoning: "abc" } }],
+			usage: { prompt_tokens: 10, completion_tokens: 5 },
+		}),
+		{
+			prompt_tokens: 10,
+			completion_tokens: 5,
+			reasoning_tokens: 0,
+			reasoning_chars: 3,
+			cached_tokens: 0,
+		},
+	);
+});
+
+test("extractUsage：无思考字段时思考字数为 0", () => {
+	assert.deepEqual(
+		extractUsage({
+			choices: [{ message: { content: "hi" } }],
+			usage: { prompt_tokens: 10, completion_tokens: 5 },
+		}),
+		{
+			prompt_tokens: 10,
+			completion_tokens: 5,
+			reasoning_tokens: 0,
+			reasoning_chars: 0,
 			cached_tokens: 0,
 		},
 	);

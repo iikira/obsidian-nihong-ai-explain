@@ -41,6 +41,8 @@ export interface UsageInfo {
 	prompt_tokens: number;
 	completion_tokens: number;
 	reasoning_tokens: number;
+	/** 思考内容字符长度（reasoning_content/reasoning 文本的 .length，无则 0） */
+	reasoning_chars: number;
 	/** 缓存命中的输入 token 数（prompt 缓存） */
 	cached_tokens: number;
 }
@@ -72,8 +74,8 @@ export interface CallAttempt {
  * 统一调用日志：累积 token 用量 + 各次尝试耗时/成败，最后通过 logger 输出一行汇总。
  * 默认不输出（遵循 lint no-console）；可注入 logger（如测试用）接收格式化后的汇总行。
  * 格式：
- *   [prefix] token: 输入=X 输出=Y 思考=Z 缓存命中=N(P%)，M 次调用 · 成功 A · 失败 B · 累计 Kms · 终态 成功/失败
- * 缓存命中 N = 命中 prompt 缓存的输入 token 数；P% = N / 输入 token 的命中率；无调用时省略调用段。
+ *   [prefix] token: 输入=X 输出=Y 思考=Z 思考字数=W 缓存命中=N(P%)，M 次调用 · 成功 A · 失败 B · 累计 Kms · 终态 成功/失败
+ * 缓存命中 N = 命中 prompt 缓存的输入 token 数；P% = N / 输入 token 的命中率；思考字数 W = 响应携带的思考文本字符数；无调用时省略调用段。
  */
 export class CallLogger {
 	private readonly prefix: string;
@@ -82,6 +84,7 @@ export class CallLogger {
 		prompt_tokens: 0,
 		completion_tokens: 0,
 		reasoning_tokens: 0,
+		reasoning_chars: 0,
 		cached_tokens: 0,
 	};
 	/** 汇总行输出函数；默认走日志页签（logInfo），测试可注入 sink */
@@ -119,6 +122,7 @@ export class CallLogger {
 			`token: 输入=${u.prompt_tokens} ` +
 			`输出=${u.completion_tokens} ` +
 			`思考=${u.reasoning_tokens} ` +
+			`思考字数=${u.reasoning_chars} ` +
 			cachePart;
 		if (this.attempts.length === 0) {
 			// 无 API 调用（如缓存直接命中）：只输出 token 段（source 列已显示模块名）
@@ -137,23 +141,25 @@ export class CallLogger {
 }
 
 /**
- * 按模型 id 动态组装"关闭思考"字段，返回要合并进请求 body 的对象。
- * - hy3-free：OpenAI 风格 { reasoning_effort: "none" }
- * - 含 deepseek-v4：DeepSeek 风格 { thinking: { type: "disabled" } }
- * - 其他：默认 OpenAI 风格 { reasoning_effort: "none" }
+ * 组装"关闭思考"字段，返回要合并进请求 body 的对象。
+ * 三种风格一起发、互不冲突，各后端取自己认的字段：
+ * - reasoning_effort（OpenAI 风格）/ thinking.type（DeepSeek 风格）：让网关不下发思考文本；
+ * - chat_template_kwargs.enable_thinking（vLLM 风格）：模板层真正不渲染思考段，
+ *   仅靠前两者时 token 仍被思考消耗（实测 completion ~600 vs 关死后 ~6）。
  */
-export function buildDisableThinking(model: string): Record<string, unknown> {
-	if (model.includes("deepseek-v4")) {
-		return { thinking: { type: "disabled" } };
-	}
-	return { reasoning_effort: "none" };
+export function buildDisableThinking(_model: string): Record<string, unknown> {
+	return {
+		reasoning_effort: "none",
+		thinking: { type: "disabled" },
+		chat_template_kwargs: { enable_thinking: false },
+	};
 }
 
 export function sleep(ms: number): Promise<void> {
 	return new Promise((r) => window.setTimeout(r, ms));
 }
 
-/** 从响应的 usage 提取 token 用量（含 prompt 缓存命中）；无 usage 返回 null */
+/** 从响应的 usage 提取 token 用量（含 prompt 缓存命中）与思考内容字符长度；无 usage 返回 null */
 export function extractUsage(data: ChatCompletionResponse): UsageInfo | null {
 	const u = data.usage;
 	if (!u) {
@@ -170,6 +176,11 @@ export function extractUsage(data: ChatCompletionResponse): UsageInfo | null {
 		prompt_tokens: prompt,
 		completion_tokens: completion,
 		reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
+		// 思考内容字符长度：兼容 DeepSeek(reasoning_content) / 部分网关(reasoning)
+		reasoning_chars:
+			(data.choices?.[0]?.message?.reasoning_content ??
+				data.choices?.[0]?.message?.reasoning ??
+				"").length,
 		// prompt 缓存命中 token：兼容 OpenAI(prompt_tokens_details) / DeepSeek(prompt_cache_hit_tokens)
 		cached_tokens:
 			u.prompt_tokens_details?.cached_tokens ??

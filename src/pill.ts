@@ -1,4 +1,5 @@
 import { setIcon, Platform } from "obsidian";
+import { selectionToCleanText } from "./utils/rubyText";
 
 const FALLBACK_PILL_ID = "nihong-ai-pill";
 const LEXIS_PILL_SELECTOR = ".lexis-sel-pill";
@@ -271,7 +272,7 @@ export class SelectionPill {
 		if (!inHost(range.commonAncestorContainer) && !inHost(range.startContainer)) {
 			return null;
 		}
-		const text = sel.toString().trim();
+		const text = selectionToCleanText(sel).trim();
 		if (!text) {
 			return null;
 		}

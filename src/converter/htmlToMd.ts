@@ -17,7 +17,8 @@ interface ImageCollector {
 /**
  * 把一章 XHTML 转成 Markdown。
  * 逐节点递归序列化；图片会收集进 collector，md 里用相对路径 images/<file> 引用。
- * 应先对 htmlString 调用 stripRuby() 再去掉注音，再传入本函数。
+ * <ruby>/<rt>/<rp> 振假名注音保留为原始 HTML 标签（Obsidian 阅读视图可渲染）。
+ * 调用方按是否需要剥离注音自行决定是否先调 stripRuby()。
  *
  * linkResolver：可选，把 epub 内部链接（如 p-001.xhtml#toc-001）改写为产物 md
  * 文件链接（如 005_p-001.md#toc-001）；返回 null 表示无法解析（保留纯文本，去链接）。
@@ -215,6 +216,25 @@ function serializeNode(
 			for (const child of Array.from(el.childNodes)) {
 				serializeNode(child, out, collector, linkResolver);
 			}
+			return;
+		}
+		// 振假名注音：保留 <ruby>/<rt>/<rp> 原始 HTML 标签
+		// （Markdown 无原生 ruby 语法，Obsidian 阅读视图可渲染内联 HTML 注音）
+		case "ruby": {
+			out.push("<ruby>");
+			for (const child of Array.from(el.childNodes)) {
+				serializeNode(child, out, collector, linkResolver);
+			}
+			out.push("</ruby>");
+			return;
+		}
+		case "rt":
+		case "rp": {
+			out.push(`<${tag}>`);
+			for (const child of Array.from(el.childNodes)) {
+				serializeNode(child, out, collector, linkResolver);
+			}
+			out.push(`</${tag}>`);
 			return;
 		}
 		// 未知块级：透传子节点

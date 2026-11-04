@@ -53,6 +53,8 @@ export interface NihongAIExplainSettings {
 	mobileFixedPill: boolean;
 	/** 移动端悬浮窗固定时距底端的距离（px）；仅移动端、mobileFixedPill=true 时生效 */
 	mobileFixedPillBottom: number;
+	/** epub 转 md 保留振假名（<ruby><rt> 注音标签）；true=保留（默认），false=剥离只留基底汉字 */
+	epubPreserveRuby: boolean;
 }
 
 
@@ -84,4 +86,5 @@ export const DEFAULT_SETTINGS: NihongAIExplainSettings = {
 	disableLexisPill: false,
 	mobileFixedPill: true,
 	mobileFixedPillBottom: 100,
+	epubPreserveRuby: true,
 };

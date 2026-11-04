@@ -69,6 +69,8 @@ export default defineConfig([
 			// prefer-window-timers 是 Obsidian 弹窗兼容规则（要求用 window.setTimeout 而非全局），
 			// Node 测试环境全局 setTimeout/clearTimeout 才是真实计时器（rejectAfter 需真实延迟），豁免。
 			"obsidianmd/prefer-window-timers": "off",
+			// 测试用标准 DOM API createDocumentFragment 构造 fragment（linkedom 无 Obsidian 的 doc.win.createFragment），豁免 prefer-create-el。
+			"obsidianmd/prefer-create-el": "off",
 			"@typescript-eslint/no-floating-promises": "off",
 			"no-undef": "off",
 		},

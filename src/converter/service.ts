@@ -2,10 +2,13 @@ import { Notice, normalizePath, type TFile, type Vault } from "obsidian";
 import { convertEpub } from "./index";
 import { ensureFolder } from "../utils";
 import { logError, errMsg } from "../log";
+import type { NihongAIExplainSettings } from "../settings/types";
 
 export interface ConverterServiceOptions {
 	/** 读取当前 vault */
 	getVault: () => Vault;
+	/** 读取当前设置（取 epubPreserveRuby 开关） */
+	getSettings: () => NihongAIExplainSettings;
 	/** 占用/释放任务槽（沿用插件全局防重入） */
 	tryStartTask: (actionId: string, key: string) => boolean;
 	finishTask: (actionId: string, key: string) => void;
@@ -46,7 +49,9 @@ export class ConverterService {
 			// 2. 纯函数转换
 			let result;
 			try {
-				result = convertEpub(buf, file.basename);
+				result = convertEpub(buf, file.basename, {
+					preserveRuby: this.opts.getSettings().epubPreserveRuby,
+				});
 			} catch (e) {
 				this.fail("转换失败", e);
 				return;

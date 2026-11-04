@@ -11,13 +11,16 @@ export type { ConvertResult, EpubStructure } from "./types";
  * 把一份 epub 的二进制字节转换成一组 Markdown 文档。
  *
  * 流程：fflate 解压 → 解析 container/OPF/spine/TOC → 按 spine 顺序逐章
- * （先去 ruby 注音 → XHTML 转 Markdown → 收集图片引用）→ 回填图片字节。
+ * （按 preserveRuby 决定是否去 ruby 注音 → XHTML 转 Markdown → 收集图片引用）→ 回填图片字节。
  *
  * 纯函数，不触碰 Obsidian API，桌面/移动端皆可运行。
+ *
+ * options.preserveRuby：true=保留 <ruby><rt> 注音标签（默认），false=剥离只留基底汉字。
  */
 export function convertEpub(
 	buffer: ArrayBuffer,
 	_baseName: string,
+	options?: { preserveRuby?: boolean },
 ): ConvertResult {
 	const zip = unzipSync(new Uint8Array(buffer));
 	const structure = parseEpubStructure(zip);
@@ -31,9 +34,11 @@ export function convertEpub(
 		return `${seq}_${sanitizeFileName(fallbackTitle)}.md`;
 	});
 
+	const preserveRuby = options?.preserveRuby ?? true;
+
 	const chapters = structure.chapters.map((chapter, index) => {
-		// 1. 去除汉字假名注音
-		const cleanHtml = stripRuby(chapter.htmlString);
+		// 1. 按 preserveRuby 决定是否去除汉字假名注音
+		const cleanHtml = preserveRuby ? chapter.htmlString : stripRuby(chapter.htmlString);
 		// 2. 转 Markdown 并收集图片占位；内部链接改写为产物 md 文件名
 		const collector = createImageCollector();
 		const linkResolver = buildLinkResolver(structure, chapter, index, chapterFilenames);

@@ -21,6 +21,7 @@ import { LOG_VIEW_TYPE, LogPanelView } from "./log/view";
 import { logError, errMsg } from "./log";
 import { DictionaryManager } from "./dictionary/manager";
 import { getSelectionRect } from "./utils";
+import { cleanSelectionText, selectionToCleanText } from "./utils/rubyText";
 import {
 	speakText,
 	stopSpeak,
@@ -106,6 +107,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 		});
 		this.converterService = new ConverterService({
 			getVault: () => this.app.vault,
+			getSettings: () => this.settings,
 			tryStartTask: (a, k) => this.tryStartTask(a, k),
 			finishTask: (a, k) => this.finishTask(a, k),
 		});
@@ -177,12 +179,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			id: "explain-selection",
 			name: "AI 讲解选中文字",
 			callback: () => {
-				const sel = window.getSelection()?.toString().trim() ?? "";
-				if (!sel) {
+				const sel = window.getSelection();
+				const text = sel ? selectionToCleanText(sel).trim() : "";
+				if (!text) {
 					new Notice("请先选中一段文字");
 					return;
 				}
-				void this.explain(sel);
+				void this.explain(text);
 			},
 		});
 
@@ -190,12 +193,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			id: "translate-selection",
 			name: "翻译选中文字",
 			callback: () => {
-				const sel = window.getSelection()?.toString().trim() ?? "";
-				if (!sel) {
+				const sel = window.getSelection();
+				const text = sel ? selectionToCleanText(sel).trim() : "";
+				if (!text) {
 					new Notice("请先选中一段文字");
 					return;
 				}
-				void this.translate(sel);
+				void this.translate(text);
 			},
 		});
 
@@ -203,12 +207,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			id: "grammar-selection",
 			name: "语法拆解选中文字",
 			callback: () => {
-				const sel = window.getSelection()?.toString().trim() ?? "";
-				if (!sel) {
+				const sel = window.getSelection();
+				const text = sel ? selectionToCleanText(sel).trim() : "";
+				if (!text) {
 					new Notice("请先选中一段文字");
 					return;
 				}
-				void this.grammar(sel);
+				void this.grammar(text);
 			},
 		});
 
@@ -216,12 +221,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			id: "lookup-selection",
 			name: "查词典选中文字",
 			callback: () => {
-				const sel = window.getSelection()?.toString().trim() ?? "";
-				if (!sel) {
+				const sel = window.getSelection();
+				const text = sel ? selectionToCleanText(sel).trim() : "";
+				if (!text) {
 					new Notice("请先选中一段文字");
 					return;
 				}
-				void this.lookup(sel);
+				void this.lookup(text);
 			},
 		});
 
@@ -229,12 +235,13 @@ export default class NihongAIExplainPlugin extends Plugin {
 			id: "speak-selection",
 			name: "朗读选中文字",
 			callback: () => {
-				const sel = window.getSelection()?.toString().trim() ?? "";
-				if (!sel) {
+				const sel = window.getSelection();
+				const text = sel ? selectionToCleanText(sel).trim() : "";
+				if (!text) {
 					new Notice("请先选中一段文字");
 					return;
 				}
-				void this.speakText(sel);
+				void this.speakText(text);
 			},
 		});
 
@@ -365,7 +372,7 @@ export default class NihongAIExplainPlugin extends Plugin {
 
 	/** 朗读选区文本 */
 	speakText(text: string): void {
-		const clean = text.trim();
+		const clean = cleanSelectionText(text);
 		if (!clean) {
 			new Notice("选区为空");
 			return;
@@ -456,21 +463,21 @@ export default class NihongAIExplainPlugin extends Plugin {
 		if (!this.explainService) {
 			return;
 		}
-		return this.explainService.explain(word);
+		return this.explainService.explain(cleanSelectionText(word));
 	}
 
 	async grammar(text: string): Promise<void> {
 		if (!this.grammarService) {
 			return;
 		}
-		return this.grammarService.explain(text);
+		return this.grammarService.explain(cleanSelectionText(text));
 	}
 
 	async translate(text: string): Promise<void> {
 		if (!this.translateService) {
 			return;
 		}
-		return this.translateService.translate(text);
+		return this.translateService.translate(cleanSelectionText(text));
 	}
 
 	async lookup(text: string): Promise<void> {

@@ -5,6 +5,7 @@ import type { SettingsContext } from "./settings/context";
 // 类型/默认值从 types.ts 搬出；re-export 保持外部 import 来源（main.ts / 三个 service）不变
 export { ModelGroup, NihongAIExplainSettings, DEFAULT_SETTINGS } from "./settings/types";
 import { renderOutputDirSection } from "./settings/outputDir";
+import { renderEpubSection } from "./settings/epub";
 import { renderModelGroupSection } from "./settings/modelGroup";
 import { renderSamplingSection } from "./settings/sampling";
 import { renderDictionarySection } from "./settings/dictionary";
@@ -50,6 +51,7 @@ export class NihongAIExplainSettingTab extends PluginSettingTab {
 		};
 
 		renderOutputDirSection(ctx, createSettingsSection(root, "输出目录", { app: ctx.app }));
+		renderEpubSection(ctx, createSettingsSection(root, "epub 转换", { app: ctx.app, open: false }));
 		renderModelGroupSection(ctx, createSettingsSection(root, "大模型分组", { app: ctx.app }));
 		renderSamplingSection(ctx, createSettingsSection(root, "采样参数", { app: ctx.app, open: false }));
 		renderDictionarySection(ctx, createSettingsSection(root, "词典与显示", { app: ctx.app }));
