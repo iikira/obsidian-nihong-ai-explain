@@ -303,6 +303,34 @@ test("lookup：signature 去重（两库同 expression+reading+glossary 合并�
 	await mgr.clear();
 });
 
+test("lookup：结果带 source 库标识（Jitendex 纯假名词头 reading 为空 ≠ 人名词典）", async () => {
+	const mgr = await getMgr();
+	await mgr.clear();
+	// Jitendex 库：纯假名词头「何ごともなく」，reading 为空，glossary 是结构化内容（重定向词条）
+	await mgr.importFromZipBuffer(buildDictZip({
+		title: "TestJitendexFull",
+		revision: "2026-10-31",
+		terms: [[
+			"何ごともなく", "", "", "", -102,
+			[{ type: "structured-content", content: { tag: "a", href: "?query=何事もなく", content: ["何事もなく"] } }],
+		]],
+	}));
+	// JMnedict 库：人名词条（glossary 存读音列表）
+	await mgr.importNamesFromZipBuffer(buildDictZip({
+		title: "TestJMnedict",
+		revision: "2026-10-31",
+		terms: [term("田中", "", "たなか")],
+	}));
+	const r1 = await mgr.lookup("何ごともなく");
+	assert.equal(r1.length, 1, "纯假名词头应命中");
+	assert.equal(r1[0].source, "jitendex", "reading 为空的 Jitendex 词条 source 应为 jitendex");
+	assert.ok(r1[0].glossary.length > 0, "glossary 应保留结构化内容");
+	const r2 = await mgr.lookup("田中");
+	assert.equal(r2.length, 1, "人名词条应命中");
+	assert.equal(r2[0].source, "names", "JMnedict 词条 source 应为 names");
+	await mgr.clear();
+});
+
 test("lookup：按 score 降序排序", async () => {
 	const mgr = await getMgr();
 	await mgr.clear();

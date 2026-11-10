@@ -155,13 +155,15 @@ export class DictionaryPopup {
 			const [expression, reading] = key.split("|");
 			const entryDiv = body.createDiv({ cls: "nihong-ai-dict-entry" });
 
-			// JMnedict 风格：reading 为空，glossary 存的是读音列表（非释义）。
-			// 此类条目 header 显示词头，下方各 term 的 tag + 读音列表（不当释义渲染）。
-			const isNamesDict = reading === "";
+			// JMnedict 人名词典风格：reading 为空、glossary 存读音列表。
+			// 不能以 reading === "" 判定——Jitendex 纯假名词头（如「何ごともなく」）reading 也为空，
+			// 会把结构化释义当读音列表全部过滤掉导致整卡空白；以 lookup 注入的 source 字段为准。
+			// 组内全部词条来自人名词典才按人名词典风格渲染 header（混合组走 Jitendex 渲染）。
+			const isNamesDict = groupTerms.every((t) => t.source === "names");
 
 			// 振假名 header
 			const header = entryDiv.createDiv({ cls: "nihong-ai-dict-header" });
-			if (!isNamesDict && expression !== reading) {
+			if (!isNamesDict && reading !== "" && expression !== reading) {
 				const segments = getFuriganaSegments(expression, reading);
 				const wrapper = header.createSpan({ cls: "nihong-ai-dict-furigana" });
 				// 每个 segment 用独立 <ruby> 包裹：base 文本 + <rt>（有 reading 时）。
@@ -202,7 +204,9 @@ export class DictionaryPopup {
 				? entryDiv.createDiv({ cls: "nihong-ai-dict-senses nihong-ai-dict-senses-names" })
 				: entryDiv.createEl("ol", { cls: "nihong-ai-dict-senses" });
 			for (const term of groupTerms) {
-				const li = isNamesDict
+				// 每 term 独立判定：混合组（人名词典 + Jitendex 同词头）各自按来源风格渲染
+				const termIsNames = term.source === "names";
+				const li = termIsNames
 					? listEl.createDiv({ cls: "nihong-ai-dict-sense" })
 					: listEl.createEl("li", { cls: "nihong-ai-dict-sense" });
 
@@ -214,13 +218,13 @@ export class DictionaryPopup {
 							continue;
 						}
 						const tag = tagSpan.createSpan({ cls: "nihong-ai-dict-tag" });
-						tag.textContent = isNamesDict ? tagLabel(t) : t;
+						tag.textContent = termIsNames ? tagLabel(t) : t;
 					}
 				}
 
 				// 释义内容
 				const glossDiv = li.createDiv({ cls: "nihong-ai-dict-glossary" });
-				if (isNamesDict) {
+				if (termIsNames) {
 					// JMnedict：glossary 是读音列表，作为读音显示（顿号分隔）
 					const readings = term.glossary.filter((g): g is string => typeof g === "string");
 					glossDiv.createSpan({ text: readings.join("、") });

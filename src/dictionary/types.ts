@@ -84,7 +84,14 @@ export interface DeinflectionResult {
 	reasons: string[];
 }
 
+/** 词条来源库标识（lookup 时按所查的 IndexedDB 注入）：
+ *  Jitendex 主库走结构化内容渲染，JMnedict 人名库走「tag + 读音列表」渲染。
+ *  不能以 reading === "" 判定人名词典——Jitendex 纯假名词头的 reading 也为空。 */
+export type DictSource = "jitendex" | "names";
+
 /** 查询返回的最终结果 */
 export interface LookupResult extends ProcessedTerm {
+	/** 来源库标识 */
+	source: DictSource;
 	deinflectionReasons?: string[];
 }

@@ -106,9 +106,11 @@ export class ExplainService extends BaseNoteService<ExplainConfig> {
 		const lines: string[] = [];
 		for (const [key, groupTerms] of groups) {
 			const [expression, reading] = key.split("|");
-			// JMnedict 风格：reading 为空，glossary 是读音列表（与 popup 一致：tag + 读音）
-			const isNamesDict = reading === "";
-			if (!isNamesDict) {
+			// JMnedict 人名词典风格：reading 为空、glossary 存读音列表（与 popup 一致：tag + 读音）。
+			// 不能以 reading === "" 判定——Jitendex 纯假名词头（如「何ごともなく」）reading 也为空，
+			// 会把结构化释义当读音列表丢掉；以 lookup 注入的 source 字段为准（组内全部词条来自人名词典）。
+			const isNamesDict = groupTerms.every((t) => t.source === "names");
+			if (!isNamesDict && reading) {
 				const accents = this.dictOpts.getAccents(expression, reading);
 				const accentStr = accents.length
 					? " " + accents.map((p) => toAccentCircle(p)).join(",")
@@ -119,7 +121,8 @@ export class ExplainService extends BaseNoteService<ExplainConfig> {
 			}
 			// 同一词头下多个 LookupResult（含不同变形来源）合并渲染。
 			for (const term of groupTerms) {
-				if (isNamesDict) {
+				// 每 term 独立判定：混合组各自按来源风格渲染
+				if (term.source === "names") {
 					// names dict：tag + 读音列表（与 popup 一致，无序号），纯函数渲染保证一致
 					lines.push(renderNamesDictTerm(term.tags, term.glossary));
 				} else {

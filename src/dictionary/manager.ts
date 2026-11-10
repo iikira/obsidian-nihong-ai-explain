@@ -8,6 +8,7 @@ import { ACCENTS_B64_GZ } from "./data/accentsData";
 import { logInfo, logWarn, logError, errMsg } from "../log";
 import type {
 	DictionaryMeta,
+	DictSource,
 	LookupResult,
 	ProcessedTag,
 	ProcessedTerm,
@@ -800,8 +801,13 @@ export class DictionaryManager {
 		return (deinflectRules & termFlags) !== 0;
 	}
 
-	/** 查单个库的 terms（expression/reading 索引 + deinflect + signature 去重） */
-	private async lookupInDb(db: IDBPDatabase<YomitanDB> | null, text: string): Promise<LookupResult[]> {
+	/** 查单个库的 terms（expression/reading 索引 + deinflect + signature 去重）。
+	 *  source 标记结果来自哪个库，渲染层据此区分 Jitendex / JMnedict 风格。 */
+	private async lookupInDb(
+		db: IDBPDatabase<YomitanDB> | null,
+		text: string,
+		source: DictSource,
+	): Promise<LookupResult[]> {
 		if (!db) {
 			return [];
 		}
@@ -826,6 +832,7 @@ export class DictionaryManager {
 				}
 				rawResults.push({
 					...match,
+					source,
 					deinflectionReasons:
 						candidate.reasons.length > 0 ? candidate.reasons : undefined,
 				});
@@ -837,8 +844,8 @@ export class DictionaryManager {
 	async lookup(text: string): Promise<LookupResult[]> {
 		// 查两个库（Jitendex + JMnedict）的并集，合并去重 + 按 score 排序
 		const [r1, r2] = await Promise.all([
-			this.lookupInDb(this.db, text),
-			this.lookupInDb(this.dbNames, text),
+			this.lookupInDb(this.db, text, "jitendex"),
+			this.lookupInDb(this.dbNames, text, "names"),
 		]);
 		const uniqueResults = new Map<string, LookupResult>();
 		for (const match of [...r1, ...r2]) {
