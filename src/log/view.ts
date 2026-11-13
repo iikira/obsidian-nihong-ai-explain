@@ -32,20 +32,22 @@ const LEVEL_PREFIX: Record<LogLevel, string> = {
 };
 
 /** tab id */
-type TabId = "log" | "translate" | "tts";
+type TabId = "log" | "translate" | "tts" | "test";
 
 /** tab 定义 */
 const TABS: { id: TabId; label: string }[] = [
 	{ id: "log", label: "日志" },
 	{ id: "translate", label: "翻译缓存" },
 	{ id: "tts", label: "朗读缓存" },
+	{ id: "test", label: "测试输入" },
 ];
 
 /**
- * 侧边栏日志页签：三个 tab —— 日志 / 翻译缓存 / 朗读缓存。
+ * 侧边栏日志页签：四个 tab —— 日志 / 翻译缓存 / 朗读缓存 / 测试输入。
  * - 日志：订阅 logger，实时渲染（时间戳、级别着色），顶部「清空」。
  * - 翻译缓存：展示 LRU 翻译缓存条目（原文 → 译文），按最近使用在前。
  * - 朗读缓存：展示 TTS 缓存条目（原文 + 引擎/语音），点击直接播 blob URL。
+ * - 测试输入：多行文本框 + 顶部「清空输入」按钮。
  *
  * 缓存 tab 在切换到时刷新快照（缓存非实时订阅，按需重渲染）。
  */
@@ -56,6 +58,7 @@ export class LogPanelView extends ItemView {
 	private logListEl: HTMLElement | null = null;
 	private translateListEl: HTMLElement | null = null;
 	private ttsListEl: HTMLElement | null = null;
+	private testInputEl: HTMLTextAreaElement | null = null;
 	private activeTab: TabId = "log";
 	/** 各 tab 的容器（切换时 show/hide） */
 	private panels: Partial<Record<TabId, HTMLElement>> = {};
@@ -132,6 +135,27 @@ export class LogPanelView extends ItemView {
 		this.ttsListEl = ttsPanel.createDiv({ cls: "nihong-ai-log-list" });
 		this.panels.tts = ttsPanel;
 
+		// 测试输入 tab：顶部「清空输入」按钮 + 多行文本框
+		const testPanel = contentEl.createDiv({ cls: "nihong-ai-log-panel" });
+		const testToolbar = testPanel.createDiv({ cls: "nihong-ai-log-toolbar" });
+		testToolbar.createSpan({ cls: "nihong-ai-log-title", text: "测试输入" });
+		testToolbar.createEl(
+			"button",
+			{ cls: "nihong-ai-log-clear-btn", text: "清空输入" },
+			(btn) => {
+				btn.addEventListener("click", () => {
+					if (this.testInputEl) {
+						this.testInputEl.value = "";
+						this.testInputEl.focus();
+					}
+				});
+			},
+		);
+		this.testInputEl = testPanel.createEl("textarea", {
+			cls: "nihong-ai-log-test-input",
+		});
+		this.panels.test = testPanel;
+
 		// 订阅缓存变更：任一缓存变更都刷新两个缓存 tab（朗读/翻译后、设置页清空缓存后），
 		// 这样在朗读缓存 tab 时翻译出新结果，朗读缓存行也能实时显示译文；反之亦然。
 		// 非可见 tab 的 DOM 已存在（只是 display:none），刷新它不影响可见 tab。
@@ -152,6 +176,7 @@ export class LogPanelView extends ItemView {
 		this.logListEl = null;
 		this.translateListEl = null;
 		this.ttsListEl = null;
+		this.testInputEl = null;
 		this.panels = {};
 		this.tabButtons = {};
 	}

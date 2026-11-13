@@ -147,6 +147,22 @@
 	}
 }
 
+// 测试输入 tab：多行文本框占满剩余空间
+.nihong-ai-log-test-input {
+	flex: 1 1 auto;
+	resize: none;
+	margin: 8px 12px;
+	padding: 8px;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+	line-height: 1.5;
+	color: var(--text-normal);
+	background: var(--background-modifier-form-field);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	overflow-y: auto;
+}
+
 // 缓存条目展示
 .nihong-ai-log-empty {
 	color: var(--text-faint);
